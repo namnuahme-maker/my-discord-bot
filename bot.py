@@ -554,19 +554,27 @@ async def movie_meetup(interaction: discord.Interaction):
 @bot.tree.command(name="ตั้งค่าแจ้งเตือนหนัง", description="ตั้งค่าห้องแชทที่ต้องการให้บอทแจ้งเตือนหนังใหม่")
 @app_commands.describe(channel="เลือกห้องแชทที่ต้องการ")
 async def set_movie_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    bot.movie_channel_id = channel.id
-    
-    # บันทึกลง config
-    config = load_config()
-    config["movie_channel_id"] = str(channel.id)
-    save_config(config)
-    
-    embed = discord.Embed(
-        title="✅ ตั้งค่าสำเร็จ!",
-        description=f"บอทจะส่งแจ้งเตือนหนังเข้าใหม่ไปที่ {channel.mention}\n\nระบบจะเช็คหนังใหม่ทุกๆ 1 ชั่วโมงอัตโนมัติ",
-        color=0x57F287
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    try:
+        bot.movie_channel_id = channel.id
+        
+        # บันทึกลง config
+        config = load_config()
+        if not isinstance(config, dict):
+            config = {}
+            
+        config["movie_channel_id"] = str(channel.id)
+        save_config(config)
+        
+        embed = discord.Embed(
+            title="✅ ตั้งค่าสำเร็จ!",
+            description=f"บอทจะส่งแจ้งเตือนหนังเข้าใหม่ไปที่ {channel.mention}\n\nระบบจะเช็คหนังใหม่ทุกๆ 1 ชั่วโมงอัตโนมัติ",
+            color=0x57F287
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_movie_channel: {e}")
+        await interaction.followup.send(f"❌ เกิดข้อผิดพลาด: {e}", ephemeral=True)
 
 # ==================== ดึงข้อมูลหนัง ====================
 

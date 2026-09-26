@@ -151,22 +151,11 @@ class MeetupView(discord.ui.View):
     @discord.ui.button(label="🔔 แจ้งเตือนอีกครั้ง", style=discord.ButtonStyle.secondary, custom_id="notify_meetup", row=1)
     async def notify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
-        title = embed.title if embed.title else "การนัดหมาย"
-        
-        location = ""
-        time_val = ""
-        for field in embed.fields:
-            if "สถานที่" in field.name:
-                location = field.value.replace("```", "").strip()
-            if "เวลานัด" in field.name:
-                time_val = field.value.replace("```", "").strip()
         
         await interaction.response.send_message(
-            f"@everyone\n\n"
-            f"🔔 **เตือนอีกครั้ง!** {title}\n"
-            f"📍 **ที่:** {location}\n"
-            f"⏰ **เวลา:** {time_val}\n\n"
-            f"👆 กดลงชื่อที่ข้อความด้านบนได้เลย!",
+            content="@everyone 🔔 **มีการแจ้งเตือนนัดหมาย!**",
+            embed=embed,
+            view=MeetupView(),
             allowed_mentions=discord.AllowedMentions(everyone=True)
         )
 
@@ -328,7 +317,17 @@ class ShowtimeSelect(discord.ui.Select):
         embed.set_author(name="🔔 นัดดูหนัง!", icon_url=interaction.user.display_avatar.url)
         
         view = MeetupView()
-        await interaction.response.edit_message(embed=embed, view=view)
+        
+        # แก้ไขข้อความ ephemeral เดิมให้เป็นข้อความสำเร็จ
+        await interaction.response.edit_message(content="✅ **สร้างการนัดหมายสำเร็จแล้ว!** ดูที่ช่องแชทได้เลยครับ", embed=None, view=None)
+        
+        # ส่งการนัดหมายลงช่องแชทแบบ public พร้อมแท็ก @everyone
+        await interaction.channel.send(
+            content="@everyone 🍿 **มีการนัดดูหนังใหม่!**", 
+            embed=embed, 
+            view=view, 
+            allowed_mentions=discord.AllowedMentions(everyone=True)
+        )
         
         # บันทึกประวัติ
         _save_meetup_from_embed(embed, interaction.guild_id)
@@ -468,7 +467,12 @@ class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการ�
         embed.set_author(name="🔔 การนัดหมายใหม่!", icon_url=interaction.user.display_avatar.url)
         
         view = MeetupView()
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.response.send_message(
+            content="@everyone 🔔 **มีการนัดหมายใหม่!**", 
+            embed=embed, 
+            view=view,
+            allowed_mentions=discord.AllowedMentions(everyone=True)
+        )
         
         # บันทึกประวัติ
         save_meetup_history(topic_val, location_val, time_val, 0, interaction.user.display_name, str(interaction.guild_id))

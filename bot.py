@@ -250,12 +250,12 @@ async def check_movies_cmd(interaction: discord.Interaction):
         embed = discord.Embed(title=f"🎬 {movie['name']}", color=discord.Color.red())
         embed.add_field(name="รอบฉาย", value=", ".join(movie['showtimes']), inline=False)
         if movie['image']:
-            embed.set_thumbnail(url=movie['image'])
+            embed.set_image(url=movie['image'])
             
         current_batch.append(embed)
         
-        # discord ลิมิตข้อความละไม่เกิน 10 embeds
-        if len(current_batch) == 10:
+        # discord ลิมิตข้อความละไม่เกิน 10 embeds แต่เราปรับลดเหลือ 3 เพื่อไม่ให้รูปโดนซ่อน
+        if len(current_batch) == 3:
             messages_embeds.append(current_batch)
             current_batch = []
             

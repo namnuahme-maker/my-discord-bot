@@ -41,8 +41,10 @@ class MeetupView(discord.ui.View):
                 return
                 
             embed.set_field_at(participants_index, name="👥 ใครไปบ้าง", value=new_participants, inline=False)
-            await interaction.message.edit(embed=embed)
-            await interaction.response.send_message("ลงชื่อสำเร็จ!", ephemeral=True)
+            await interaction.response.edit_message(embed=embed)
+            await interaction.followup.send("ลงชื่อสำเร็จ!", ephemeral=True)
+        else:
+            await interaction.response.send_message("เกิดข้อผิดพลาด ไม่พบช่องลงชื่อ", ephemeral=True)
 
     @discord.ui.button(label="เพิ่มหมายเหตุ", style=discord.ButtonStyle.secondary, custom_id="note_meetup")
     async def note_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -77,8 +79,10 @@ class NoteModal(discord.ui.Modal, title='เพิ่มหมายเหตุ
                 new_notes = current_notes + f"\n{note_str}"
                 
             embed.set_field_at(notes_index, name="📝 หมายเหตุเพิ่มเติม", value=new_notes, inline=False)
-            await interaction.message.edit(embed=embed)
-            await interaction.response.send_message("เพิ่มหมายเหตุแล้ว!", ephemeral=True)
+            await interaction.response.edit_message(embed=embed)
+            await interaction.followup.send("เพิ่มหมายเหตุแล้ว!", ephemeral=True)
+        else:
+            await interaction.response.send_message("เกิดข้อผิดพลาด ไม่พบช่องหมายเหตุ", ephemeral=True)
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -195,9 +199,11 @@ async def fetch_major_movies():
                     if '@context' in data and '@graph' in data:
                         for item in data['@graph']:
                             if item.get('@type') == 'ScreeningEvent':
-                                # ชื่อหนังจาก workPresented
+                                # ชื่อหนังจาก workPresented (เน้นภาษาอังกฤษ)
                                 work = item.get('workPresented', {})
-                                movie_name = work.get('name', 'Unknown')
+                                movie_name = work.get('alternateName')
+                                if not movie_name:
+                                    movie_name = work.get('name', 'Unknown')
                                 movie_image = work.get('image', '')
                                 
                                 # รอบฉายจาก startDate
@@ -233,22 +239,32 @@ async def check_movies_cmd(interaction: discord.Interaction):
         await interaction.followup.send("ไม่พบข้อมูลรอบหนังในขณะนี้")
         return
         
-    embeds = []
-    current_embed = discord.Embed(title="🍿 รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้", color=discord.Color.red())
+    messages_embeds = []
+    current_batch = []
     
-    for i, movie in enumerate(movies):
-        showtimes_str = ", ".join(movie['showtimes'])
-        current_embed.add_field(name=f"🎬 {movie['name']}", value=f"รอบฉาย: {showtimes_str}", inline=False)
-        
-        # ส่งทีละไม่เกิน 25 fields ตามลิมิตของ discord
-        if (i + 1) % 25 == 0:
-            embeds.append(current_embed)
-            current_embed = discord.Embed(title="🍿 รอบหนังเมเจอร์ บิ๊กซี ลพบุรี (ต่อ)", color=discord.Color.red())
+    # หน้าแรกใส่หัวข้อนำหน้าหน่อย
+    intro_embed = discord.Embed(title="🍿 รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้", color=discord.Color.red())
+    current_batch.append(intro_embed)
+    
+    for movie in movies:
+        embed = discord.Embed(title=f"🎬 {movie['name']}", color=discord.Color.red())
+        embed.add_field(name="รอบฉาย", value=", ".join(movie['showtimes']), inline=False)
+        if movie['image']:
+            embed.set_thumbnail(url=movie['image'])
             
-    if len(current_embed.fields) > 0:
-        embeds.append(current_embed)
+        current_batch.append(embed)
         
-    await interaction.followup.send(embeds=embeds)
+        # discord ลิมิตข้อความละไม่เกิน 10 embeds
+        if len(current_batch) == 10:
+            messages_embeds.append(current_batch)
+            current_batch = []
+            
+    if current_batch:
+        messages_embeds.append(current_batch)
+        
+    # ส่งข้อความ
+    for batch in messages_embeds:
+        await interaction.followup.send(embeds=batch)
 
 if __name__ == '__main__':
     keep_alive()

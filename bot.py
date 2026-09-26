@@ -14,48 +14,87 @@ TOKEN = os.environ.get('DISCORD_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 
 class MeetupView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # ให้ปุ่มอยู่ได้ตลอดไป
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="ลงชื่อไป", style=discord.ButtonStyle.green, custom_id="join_meetup")
+    @discord.ui.button(label="✅ ไปด้วย!", style=discord.ButtonStyle.green, custom_id="join_meetup", row=0)
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # ดึง embed ปัจจุบัน
         embed = interaction.message.embeds[0]
         
-        # หา field "ใครไปบ้าง"
         participants_index = -1
+        count_index = -1
         for i, field in enumerate(embed.fields):
-            if field.name == "👥 ใครไปบ้าง":
+            if "ใครไปบ้าง" in field.name:
                 participants_index = i
-                break
+            if "จำนวนคน" in field.name:
+                count_index = i
                 
         if participants_index != -1:
             current_participants = embed.fields[participants_index].value
             user_mention = interaction.user.mention
             
-            if current_participants == "-":
-                new_participants = user_mention
+            if current_participants == "*ยังไม่มีใครลงชื่อ*":
+                new_participants = f">>> {user_mention}"
+                count = 1
             elif user_mention not in current_participants:
                 new_participants = current_participants + f"\n{user_mention}"
+                count = new_participants.count("<@")
             else:
-                await interaction.response.send_message("คุณลงชื่อไปแล้ว!", ephemeral=True)
+                await interaction.response.send_message("❌ คุณลงชื่อไปแล้วนะ!", ephemeral=True)
                 return
                 
             embed.set_field_at(participants_index, name="👥 ใครไปบ้าง", value=new_participants, inline=False)
+            if count_index != -1:
+                embed.set_field_at(count_index, name="🔢 จำนวนคน", value=f"` {count} คน `", inline=True)
             await interaction.response.edit_message(embed=embed)
-            await interaction.followup.send("ลงชื่อสำเร็จ!", ephemeral=True)
         else:
-            await interaction.response.send_message("เกิดข้อผิดพลาด ไม่พบช่องลงชื่อ", ephemeral=True)
+            await interaction.response.send_message("เกิดข้อผิดพลาด", ephemeral=True)
 
-    @discord.ui.button(label="เพิ่มหมายเหตุ", style=discord.ButtonStyle.secondary, custom_id="note_meetup")
+    @discord.ui.button(label="❌ ไม่ไปแล้ว", style=discord.ButtonStyle.red, custom_id="leave_meetup", row=0)
+    async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = interaction.message.embeds[0]
+        
+        participants_index = -1
+        count_index = -1
+        for i, field in enumerate(embed.fields):
+            if "ใครไปบ้าง" in field.name:
+                participants_index = i
+            if "จำนวนคน" in field.name:
+                count_index = i
+                
+        if participants_index != -1:
+            current_participants = embed.fields[participants_index].value
+            user_mention = interaction.user.mention
+            
+            if user_mention in current_participants:
+                new_participants = current_participants.replace(f"\n{user_mention}", "").replace(f">>> {user_mention}", "").replace(user_mention, "")
+                new_participants = new_participants.strip()
+                
+                if not new_participants or new_participants == ">>>":
+                    new_participants = "*ยังไม่มีใครลงชื่อ*"
+                    count = 0
+                else:
+                    if not new_participants.startswith(">>>"):
+                        new_participants = ">>> " + new_participants.lstrip("\n")
+                    count = new_participants.count("<@")
+                    
+                embed.set_field_at(participants_index, name="👥 ใครไปบ้าง", value=new_participants, inline=False)
+                if count_index != -1:
+                    embed.set_field_at(count_index, name="🔢 จำนวนคน", value=f"` {count} คน `", inline=True)
+                await interaction.response.edit_message(embed=embed)
+            else:
+                await interaction.response.send_message("❌ คุณยังไม่ได้ลงชื่อเลยนะ!", ephemeral=True)
+        else:
+            await interaction.response.send_message("เกิดข้อผิดพลาด", ephemeral=True)
+
+    @discord.ui.button(label="📝 เพิ่มหมายเหตุ", style=discord.ButtonStyle.blurple, custom_id="note_meetup", row=1)
     async def note_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # เปิด Modal ให้พิมพ์หมายเหตุ
         await interaction.response.send_modal(NoteModal())
 
-class NoteModal(discord.ui.Modal, title='เพิ่มหมายเหตุ'):
+class NoteModal(discord.ui.Modal, title='📝 เพิ่มหมายเหตุ'):
     note_text = discord.ui.TextInput(
         label='พิมพ์หมายเหตุของคุณ',
         style=discord.TextStyle.long,
-        placeholder='เช่น ขอไปสาย 10 นาทีนะ...',
+        placeholder='เช่น ขอไปสาย 10 นาทีนะ, เอารถไป 2 คัน...',
         required=True,
         max_length=300,
     )
@@ -65,24 +104,23 @@ class NoteModal(discord.ui.Modal, title='เพิ่มหมายเหตุ
         
         notes_index = -1
         for i, field in enumerate(embed.fields):
-            if field.name == "📝 หมายเหตุเพิ่มเติม":
+            if "หมายเหตุจากเพื่อนๆ" in field.name:
                 notes_index = i
                 break
                 
-        note_str = f"**{interaction.user.display_name}**: {self.note_text.value}"
+        note_str = f"💬 **{interaction.user.display_name}:** {self.note_text.value}"
                 
         if notes_index != -1:
             current_notes = embed.fields[notes_index].value
-            if current_notes == "-":
+            if current_notes == "*ยังไม่มีหมายเหตุ*":
                 new_notes = note_str
             else:
                 new_notes = current_notes + f"\n{note_str}"
                 
-            embed.set_field_at(notes_index, name="📝 หมายเหตุเพิ่มเติม", value=new_notes, inline=False)
+            embed.set_field_at(notes_index, name="📋 หมายเหตุจากเพื่อนๆ", value=new_notes, inline=False)
             await interaction.response.edit_message(embed=embed)
-            await interaction.followup.send("เพิ่มหมายเหตุแล้ว!", ephemeral=True)
         else:
-            await interaction.response.send_message("เกิดข้อผิดพลาด ไม่พบช่องหมายเหตุ", ephemeral=True)
+            await interaction.response.send_message("เกิดข้อผิดพลาด", ephemeral=True)
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -90,10 +128,9 @@ class MyBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix='!', intents=intents)
         self.movie_cache = set()
-        self.movie_channel_id = None # ใส่ ID ห้องที่อยากให้แจ้งเตือนหนังใหม่ (ถ้าต้องการ)
+        self.movie_channel_id = None
 
     async def setup_hook(self):
-        # Sync slash commands
         await self.tree.sync()
         self.add_view(MeetupView())
         self.check_movies.start()
@@ -102,7 +139,7 @@ class MyBot(commands.Bot):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
         print('------')
 
-    @tasks.loop(hours=1) # เช็คทุกๆ 1 ชั่วโมง
+    @tasks.loop(hours=1)
     async def check_movies(self):
         try:
             movies = await fetch_major_movies()
@@ -112,7 +149,6 @@ class MyBot(commands.Bot):
                     new_movies.append(movie)
                     self.movie_cache.add(movie['name'])
             
-            # ถ้ามีหนังใหม่ และตั้งค่าช่องไว้ ให้ส่งแจ้งเตือน
             if new_movies and self.movie_channel_id:
                 channel = self.get_channel(self.movie_channel_id)
                 if channel:
@@ -126,7 +162,7 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-class CreateMeetupModal(discord.ui.Modal, title='สร้างการนัดหมาย'):
+class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการนัดหมาย'):
     topic = discord.ui.TextInput(
         label='หัวข้อการนัดหมาย',
         style=discord.TextStyle.short,
@@ -137,21 +173,21 @@ class CreateMeetupModal(discord.ui.Modal, title='สร้างการนั�
     location = discord.ui.TextInput(
         label='สถานที่',
         style=discord.TextStyle.short,
-        placeholder='เช่น หอ A, ร้านประจำ, Discord',
+        placeholder='เช่น หอ A, ร้านประจำ, Major ลพบุรี',
         required=True,
         max_length=100,
     )
     time_str = discord.ui.TextInput(
         label='เวลา',
         style=discord.TextStyle.short,
-        placeholder='เช่น 20:00, วันนี้ทุ่มตรง',
+        placeholder='เช่น วันนี้ 20:00, พรุ่งนี้บ่ายโมง',
         required=True,
         max_length=50,
     )
     note = discord.ui.TextInput(
-        label='หมายเหตุ (ใส่หรือไม่ใส่ก็ได้)',
+        label='หมายเหตุ (ไม่ใส่ก็ได้)',
         style=discord.TextStyle.long,
-        placeholder='เช่น ใครสายจ่ายค่าข้าว...',
+        placeholder='เช่น ใครสายจ่ายค่าข้าว, เตรียมเสื้อสีดำมา...',
         required=False,
         max_length=300,
     )
@@ -160,18 +196,31 @@ class CreateMeetupModal(discord.ui.Modal, title='สร้างการนั�
         topic_val = self.topic.value
         location_val = self.location.value
         time_val = self.time_str.value
-        note_val = self.note.value if self.note.value else "-"
+        note_val = self.note.value if self.note.value else None
 
-        embed = discord.Embed(title=f"📢 **{topic_val}**", color=discord.Color.blue())
-        embed.add_field(name="📍 ที่ไหน", value=location_val, inline=False)
-        embed.add_field(name="⏰ เวลาเท่าไหร่", value=time_val, inline=False)
+        embed = discord.Embed(
+            title=f"📅  {topic_val}",
+            description="━━━━━━━━━━━━━━━━━━━━━━",
+            color=0x5865F2  # สีม่วงดิสคอร์ด
+        )
         
-        if note_val != "-":
-            embed.add_field(name="📌 หมายเหตุตั้งต้น", value=note_val, inline=False)
+        embed.add_field(name="📍 สถานที่", value=f"```{location_val}```", inline=True)
+        embed.add_field(name="⏰ เวลานัด", value=f"```{time_val}```", inline=True)
+        
+        if note_val:
+            embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
+            embed.add_field(name="📌 หมายเหตุ", value=f"> {note_val}", inline=False)
             
-        embed.add_field(name="👥 ใครไปบ้าง", value="-", inline=False)
-        embed.add_field(name="📝 หมายเหตุเพิ่มเติม", value="-", inline=False)
-        embed.set_footer(text=f"สร้างโดย {interaction.user.display_name}")
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
+        embed.add_field(name="🔢 จำนวนคน", value="` 0 คน `", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="👥 ใครไปบ้าง", value="*ยังไม่มีใครลงชื่อ*", inline=False)
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
+        embed.add_field(name="📋 หมายเหตุจากเพื่อนๆ", value="*ยังไม่มีหมายเหตุ*", inline=False)
+        
+        embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดปุ่มด้านล่างเพื่อลงชื่อ!")
+        embed.set_author(name="🔔 การนัดหมายใหม่!", icon_url=interaction.user.display_avatar.url)
         
         view = MeetupView()
         await interaction.response.send_message(embed=embed, view=view)

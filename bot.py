@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -99,7 +100,7 @@ class MeetupView(discord.ui.View):
                 
             embed.set_field_at(participants_index, name="👥 ใครไปบ้าง", value=new_participants, inline=False)
             if count_index != -1:
-                embed.set_field_at(count_index, name="🔢 จำนวนคน", value=f"` {count} คน `", inline=True)
+                embed.set_field_at(count_index, name="จำนวนคน", value=f"` {count} คน `", inline=True)
             await interaction.response.edit_message(embed=embed)
             
             # บันทึกประวัติ (อัพเดทจำนวนคน)
@@ -152,16 +153,114 @@ class MeetupView(discord.ui.View):
     async def notify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         
-        await interaction.response.send_message(
-            content="@everyone 🔔 **มีการแจ้งเตือนนัดหมาย!**",
-            embed=embed,
-            view=MeetupView(),
-            allowed_mentions=discord.AllowedMentions(everyone=True)
-        )
+        # ตอบกลับแบบส่วนตัวก่อน เพื่อให้ interaction เสร็จสิ้น
+        await interaction.response.send_message("✅ ดันโพสต์แจ้งเตือนเรียบร้อยครับ", ephemeral=True)
+        
+        try:
+            # ส่งข้อความใหม่ลงช่องแชทแบบปกติ (ไม่ให้ติด Re: Original message was deleted)
+            await interaction.channel.send(
+                content="@everyone 🔔 **มีการแจ้งเตือนนัดหมาย!**",
+                embed=embed,
+                view=MeetupView(),
+                allowed_mentions=discord.AllowedMentions(everyone=True)
+            )
+            
+            # ลบข้อความเก่า
+            await interaction.message.delete()
+        except discord.errors.Forbidden:
+            await interaction.followup.send("❌ **บอทไม่มีสิทธิ์ (Permission) ในการส่งหรือลบข้อความในห้องนี้ครับ** \nโปรดไปที่ตั้งค่าห้อง -> Permissions -> ให้สิทธิ์ `Send Messages` และ `Manage Messages` กับบอทด้วยครับ", ephemeral=True)
+            print("Missing Access: Bot needs Send Messages permission.")
+        except Exception as e:
+            print(f"Error in notify_button: {e}")
+            
+        # ลบข้อความส่วนตัว (ephemeral) หลัง 5 วินาที
+        async def delete_after():
+            await asyncio.sleep(5)
+            try:
+                await interaction.delete_original_response()
+            except:
+                pass
+        asyncio.create_task(delete_after())
+
+    @discord.ui.button(label="✏️ อัพเดทข้อมูล", style=discord.ButtonStyle.secondary, custom_id="edit_meetup", row=2)
+    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = interaction.message.embeds[0]
+        
+        location = ""
+        time_val = ""
+        for field in embed.fields:
+            if "สถานที่" in field.name:
+                location = field.value.replace("```", "").strip()
+            if "เวลานัด" in field.name:
+                time_val = field.value.replace("```", "").strip()
+                
+        await interaction.response.send_modal(EditMeetupModal(location, time_val))
+
+
+class DraftMeetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✏️ แก้ไขข้อมูล", style=discord.ButtonStyle.secondary, custom_id="draft_edit_meetup", row=0)
+    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = interaction.message.embeds[0]
+        
+        location = ""
+        time_val = ""
+        for field in embed.fields:
+            if "สถานที่" in field.name:
+                location = field.value.replace("```", "").strip()
+            if "เวลานัด" in field.name:
+                time_val = field.value.replace("```", "").strip()
+                
+        await interaction.response.send_modal(EditMeetupModal(location, time_val))
+
+    @discord.ui.button(label="📢 ยืนยันข้อมูลนัด", style=discord.ButtonStyle.success, custom_id="draft_confirm_meetup", row=0)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = interaction.message.embeds[0]
+        
+        # เปลี่ยนสีกรอบเป็นสีเขียว
+        embed.color = discord.Color.green()
+        
+        # เปลี่ยนข้อความ Footer และ Author กลับเป็นแบบปกติ
+        footer_text = embed.footer.text.replace("กดยืนยันเพื่อส่งลงห้องแชท", "กดปุ่มด้านล่างเพื่อลงชื่อ!") if embed.footer else ""
+        embed.set_footer(text=footer_text)
+        
+        author_name = embed.author.name.replace("ร่าง", "") if (embed.author and embed.author.name) else "🔔 การนัดหมาย"
+        icon_url = embed.author.icon_url if embed.author else None
+        embed.set_author(name=author_name, icon_url=icon_url)
+        
+        try:
+            # ลบข้อความ Draft (ตอบกลับ interaction ก่อน)
+            await interaction.response.edit_message(content="✅ **ส่งการนัดหมายลงช่องแชทแล้วครับ!**", embed=None, view=None)
+            
+            # ส่งข้อความจริงลงห้อง
+            await interaction.channel.send(
+                content="@everyone 📢 **มีการนัดหมายใหม่! **",
+                embed=embed,
+                view=MeetupView(),
+                allowed_mentions=discord.AllowedMentions(everyone=True)
+            )
+            
+            # ลบข้อความส่วนตัว (ephemeral) หลัง 5 วินาที
+            async def delete_after():
+                await asyncio.sleep(5)
+                try:
+                    await interaction.delete_original_response()
+                except:
+                    pass
+            asyncio.create_task(delete_after())
+            
+        except discord.errors.Forbidden:
+            await interaction.followup.send("❌ **บอทไม่มีสิทธิ์ (Permission) ส่งข้อความในห้องนี้ครับ** \nโปรดให้สิทธิ์ `Send Messages` กับบอทด้วยครับ", ephemeral=True)
+            print("Missing Access: Bot needs Send Messages permission.")
+        except Exception as e:
+            await interaction.followup.send(f"❌ **เกิดข้อผิดพลาดในการส่งข้อความ:** {e}", ephemeral=True)
+            print(f"Error in confirm_button: {e}")
 
 def _save_meetup_from_embed(embed, guild_id):
     """ดึงข้อมูลจาก embed แล้วบันทึกประวัติ"""
-    topic = embed.title.replace("📅", "").replace("🎬", "").strip() if embed.title else "ไม่ระบุ"
+    topic = embed.title.replace("", "").replace("🎬", "").strip() if embed.title else "ไม่ระบุ"
     location = ""
     time_val = ""
     count = 0
@@ -203,6 +302,41 @@ def _save_meetup_from_embed(embed, guild_id):
     
     history = history[-50:]
     save_json(HISTORY_FILE, history)
+
+class EditMeetupModal(discord.ui.Modal, title='✏️ แก้ไขข้อมูลนัดหมาย'):
+    location = discord.ui.TextInput(
+        label='สถานที่',
+        style=discord.TextStyle.short,
+        placeholder='เช่น หอ A, ร้านประจำ, Major ลพบุรี',
+        required=True,
+        max_length=100,
+    )
+    time_str = discord.ui.TextInput(
+        label='เวลา',
+        style=discord.TextStyle.short,
+        placeholder='เช่น วันนี้ 20:00, พรุ่งนี้บ่ายโมง',
+        required=True,
+        max_length=50,
+    )
+
+    def __init__(self, current_location, current_time):
+        super().__init__()
+        self.location.default = current_location
+        self.time_str.default = current_time
+
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = interaction.message.embeds[0]
+        
+        for i, field in enumerate(embed.fields):
+            if "สถานที่" in field.name:
+                embed.set_field_at(i, name="📍 สถานที่", value=f"```{self.location.value}```", inline=True)
+            if "เวลานัด" in field.name:
+                embed.set_field_at(i, name="⏰ เวลานัด", value=f"```{self.time_str.value}```", inline=True)
+                
+        await interaction.response.edit_message(embed=embed)
+        
+        # บันทึกประวัติ (ถ้าต้องการ)
+        _save_meetup_from_embed(embed, interaction.guild_id)
 
 class NoteModal(discord.ui.Modal, title='📝 เพิ่มหมายเหตุ'):
     note_text = discord.ui.TextInput(
@@ -277,6 +411,63 @@ class MovieSelectView(discord.ui.View):
         super().__init__(timeout=120)
         self.add_item(MovieSelect(movies))
 
+class MovieDateModal(discord.ui.Modal, title='📅 เลือกวันที่ต้องการดูหนัง'):
+    date_str = discord.ui.TextInput(
+        label='วันที่',
+        style=discord.TextStyle.short,
+        placeholder='เช่น วันนี้, พรุ่งนี้, วันเสาร์ที่ 15',
+        default='วันนี้',
+        required=True,
+        max_length=50,
+    )
+
+    def __init__(self, movie, selected_time):
+        super().__init__()
+        self.movie = movie
+        self.selected_time = selected_time
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # รวมวันที่และเวลาเข้าด้วยกัน
+        if self.selected_time == "ยังไม่ระบุเวลา":
+            final_time = f"{self.date_str.value} (ยังไม่ระบุเวลา)"
+        else:
+            final_time = f"{self.date_str.value} เวลา {self.selected_time}"
+            
+        # สร้างการ์ดนัดหมายดูหนัง
+        embed = discord.Embed(
+            title=f"📅  🎬 {self.movie['name']}",
+            description="━━━━━━━━━━━━━━━━━━━━━━",
+            color=0x5865F2
+        )
+        
+        embed.add_field(name="📍 สถานที่", value="```เมเจอร์ บิ๊กซี ลพบุรี```", inline=True)
+        embed.add_field(name="⏰ เวลานัด", value=f"```{final_time}```", inline=True)
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
+        embed.add_field(name="🔢 จำนวนคน", value="` 0 คน `", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="👥 ใครไปบ้าง", value="*ยังไม่มีใครลงชื่อ*", inline=False)
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
+        embed.add_field(name="📋 หมายเหตุจากเพื่อนๆ", value="*ยังไม่มีหมายเหตุ*", inline=False)
+        
+        if self.movie['image']:
+            embed.set_thumbnail(url=self.movie['image'])
+        
+        embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดยืนยันเพื่อส่งลงห้องแชท")
+        embed.set_author(name="🔔 ร่างนัดดูหนัง", icon_url=interaction.user.display_avatar.url)
+        
+        view = DraftMeetupView()
+        
+        # ส่งเป็นการตอบกลับใหม่ (ephemeral)
+        await interaction.response.edit_message(
+            content="นี่คือ **ร่างการนัดหมาย** (มีแค่คุณที่เห็น) \nเมื่อแก้ไขจนพอใจแล้ว ให้กดปุ่ม **📢 ยืนยันข้อมูลนัด** เพื่อส่งเข้าห้องแชทรวมครับ",
+            embed=embed, 
+            view=view
+        )
+        
+        # บันทึกประวัติ
+        _save_meetup_from_embed(embed, interaction.guild_id)
+
 class ShowtimeSelect(discord.ui.Select):
     def __init__(self, movie):
         self.movie = movie
@@ -287,50 +478,23 @@ class ShowtimeSelect(discord.ui.Select):
                 value=t,
                 emoji="🎟️"
             ))
+            
+        # เพิ่มตัวเลือก "ยังไม่แน่ใจ"
+        options.append(discord.SelectOption(
+            label="🤔 ยังไม่แน่ใจว่าจะดูเมื่อไหร่",
+            description="นัดหมายไว้ก่อน ค่อยตกลงเวลากันทีหลัง",
+            value="ยังไม่ระบุเวลา",
+            emoji="⏳"
+        ))
+        
         super().__init__(placeholder="🕐 เลือกรอบฉาย...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         selected_time = self.values[0]
         movie = self.movie
         
-        # สร้างการ์ดนัดหมายดูหนังอัตโนมัติ
-        embed = discord.Embed(
-            title=f"📅  🎬 {movie['name']}",
-            description="━━━━━━━━━━━━━━━━━━━━━━",
-            color=0x5865F2
-        )
-        
-        embed.add_field(name="📍 สถานที่", value="```เมเจอร์ บิ๊กซี ลพบุรี```", inline=True)
-        embed.add_field(name="⏰ เวลานัด", value=f"```{selected_time}```", inline=True)
-        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        embed.add_field(name="🔢 จำนวนคน", value="` 0 คน `", inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-        embed.add_field(name="👥 ใครไปบ้าง", value="*ยังไม่มีใครลงชื่อ*", inline=False)
-        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        embed.add_field(name="📋 หมายเหตุจากเพื่อนๆ", value="*ยังไม่มีหมายเหตุ*", inline=False)
-        
-        if movie['image']:
-            embed.set_thumbnail(url=movie['image'])
-        
-        embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดปุ่มด้านล่างเพื่อลงชื่อ!")
-        embed.set_author(name="🔔 นัดดูหนัง!", icon_url=interaction.user.display_avatar.url)
-        
-        view = MeetupView()
-        
-        # แก้ไขข้อความ ephemeral เดิมให้เป็นข้อความสำเร็จ
-        await interaction.response.edit_message(content="✅ **สร้างการนัดหมายสำเร็จแล้ว!** ดูที่ช่องแชทได้เลยครับ", embed=None, view=None)
-        
-        # ส่งการนัดหมายลงช่องแชทแบบ public พร้อมแท็ก @everyone
-        await interaction.channel.send(
-            content="@everyone 🍿 **มีการนัดดูหนังใหม่!**", 
-            embed=embed, 
-            view=view, 
-            allowed_mentions=discord.AllowedMentions(everyone=True)
-        )
-        
-        # บันทึกประวัติ
-        _save_meetup_from_embed(embed, interaction.guild_id)
+        # เด้งหน้าต่างให้พิมพ์วันที่
+        await interaction.response.send_modal(MovieDateModal(movie, selected_time))
 
 class ShowtimeSelectView(discord.ui.View):
     def __init__(self, movie):
@@ -463,23 +627,47 @@ class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการ�
         embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
         embed.add_field(name="📋 หมายเหตุจากเพื่อนๆ", value="*ยังไม่มีหมายเหตุ*", inline=False)
         
-        embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดปุ่มด้านล่างเพื่อลงชื่อ!")
-        embed.set_author(name="🔔 การนัดหมายใหม่!", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดยืนยันเพื่อส่งลงห้องแชท")
+        embed.set_author(name="🔔 ร่างการนัดหมาย", icon_url=interaction.user.display_avatar.url)
         
-        view = MeetupView()
+        view = DraftMeetupView()
         await interaction.response.send_message(
-            content="@everyone 🔔 **มีการนัดหมายใหม่!**", 
+            content="นี่คือ **ร่างการนัดหมาย** (มีแค่คุณที่เห็น) \nเมื่อแก้ไขจนพอใจแล้ว ให้กดปุ่ม **📢 ยืนยันข้อมูลนัด** เพื่อส่งเข้าห้องแชทรวมครับ",
             embed=embed, 
             view=view,
-            allowed_mentions=discord.AllowedMentions(everyone=True)
+            ephemeral=True
         )
         
         # บันทึกประวัติ
         save_meetup_history(topic_val, location_val, time_val, 0, interaction.user.display_name, str(interaction.guild_id))
 
-@bot.tree.command(name="นัดเพื่อน", description="เปิดหน้าต่าง UI สร้างการนัดหมาย")
-async def meetup(interaction: discord.Interaction):
-    await interaction.response.send_modal(CreateMeetupModal())
+@bot.tree.command(name="นัด", description="สร้างการนัดหมาย (นัดปกติ หรือ นัดดูหนัง)")
+@app_commands.describe(ประเภท="เลือกประเภทการนัดหมาย")
+@app_commands.choices(ประเภท=[
+    app_commands.Choice(name="📝 นัดปกติ (พิมพ์สถานที่และเวลาเอง)", value="normal"),
+    app_commands.Choice(name="🎬 นัดดูหนัง (เลือกหนังจากเมเจอร์)", value="movie"),
+])
+async def meetup(interaction: discord.Interaction, ประเภท: app_commands.Choice[str]):
+    if ประเภท.value == "normal":
+        await interaction.response.send_modal(CreateMeetupModal())
+    elif ประเภท.value == "movie":
+        await interaction.response.defer(ephemeral=True)
+        
+        movies = await fetch_major_movies()
+        
+        if not movies:
+            await interaction.followup.send("❌ ไม่พบข้อมูลรอบหนังในขณะนี้", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="🎬 เลือกหนังที่อยากดู",
+            description="━━━━━━━━━━━━━━━━━━━━━━\nเลือกหนังจาก Dropdown ด้านล่าง\nจากนั้นเลือกรอบฉาย แล้วบอทจะสร้างนัดหมายให้อัตโนมัติ!",
+            color=0xE50914
+        )
+        embed.set_footer(text="📍 เมเจอร์ บิ๊กซี ลพบุรี")
+        
+        view = MovieSelectView(movies)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 # ==================== ฟีเจอร์ 1: ประวัตินัดหมาย ====================
 
@@ -527,53 +715,33 @@ async def meetup_history(interaction: discord.Interaction):
     embed.set_footer(text=f"ทั้งหมด {len(history)} นัดหมาย")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ==================== ฟีเจอร์ 2: นัดดูหนังอัตโนมัติ ====================
 
-@bot.tree.command(name="นัดดูหนัง", description="เลือกหนังจากเมเจอร์แล้วสร้างนัดหมายอัตโนมัติ")
-async def movie_meetup(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    
-    movies = await fetch_major_movies()
-    
-    if not movies:
-        await interaction.followup.send("❌ ไม่พบข้อมูลรอบหนังในขณะนี้", ephemeral=True)
-        return
-    
-    embed = discord.Embed(
-        title="🎬 เลือกหนังที่อยากดู",
-        description="━━━━━━━━━━━━━━━━━━━━━━\nเลือกหนังจาก Dropdown ด้านล่าง\nจากนั้นเลือกรอบฉาย แล้วบอทจะสร้างนัดหมายให้อัตโนมัติ!",
-        color=0xE50914
-    )
-    embed.set_footer(text="📍 เมเจอร์ บิ๊กซี ลพบุรี")
-    
-    view = MovieSelectView(movies)
-    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 # ==================== ฟีเจอร์ 3: ตั้งค่าห้องแจ้งเตือนหนังใหม่ ====================
 
 @bot.tree.command(name="ตั้งค่าแจ้งเตือนหนัง", description="ตั้งค่าห้องแชทที่ต้องการให้บอทแจ้งเตือนหนังใหม่")
-@app_commands.describe(channel="เลือกห้องแชทที่ต้องการ")
-async def set_movie_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+@app_commands.describe(channel="เลือกห้องแชท (ถ้าไม่เลือกจะใช้ห้องปัจจุบัน)")
+async def set_movie_channel(interaction: discord.Interaction, channel: discord.TextChannel = None):
     await interaction.response.defer(ephemeral=True)
     try:
-        bot.movie_channel_id = channel.id
+        target_channel = channel if channel else interaction.channel
+        bot.movie_channel_id = target_channel.id
         
         # บันทึกลง config
         config = load_config()
         if not isinstance(config, dict):
             config = {}
             
-        config["movie_channel_id"] = str(channel.id)
+        config["movie_channel_id"] = str(target_channel.id)
         save_config(config)
         
         embed = discord.Embed(
             title="✅ ตั้งค่าสำเร็จ!",
-            description=f"บอทจะส่งแจ้งเตือนหนังเข้าใหม่ไปที่ {channel.mention}\n\nระบบจะเช็คหนังใหม่ทุกๆ 1 ชั่วโมงอัตโนมัติ",
+            description=f"บอทจะส่งแจ้งเตือนหนังเข้าใหม่ไปที่ {target_channel.mention}\n\nระบบจะเช็คหนังใหม่ทุกๆ 1 ชั่วโมงอัตโนมัติ",
             color=0x57F287
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
     except Exception as e:
-        print(f"Error in set_movie_channel: {e}")
         await interaction.followup.send(f"❌ เกิดข้อผิดพลาด: {e}", ephemeral=True)
 
 # ==================== ดึงข้อมูลหนัง ====================

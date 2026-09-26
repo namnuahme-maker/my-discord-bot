@@ -122,27 +122,59 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-@bot.tree.command(name="นัดเพื่อน", description="สร้างการนัดหมาย")
-@app_commands.describe(
-    topic="หัวข้อการนัดหมาย",
-    location="สถานที่",
-    time="เวลา",
-    note="หมายเหตุ (ใส่ - ถ้าไม่มี)"
-)
-async def meetup(interaction: discord.Interaction, topic: str, location: str, time: str, note: str = "-"):
-    embed = discord.Embed(title=f"📢 **{topic}**", color=discord.Color.blue())
-    embed.add_field(name="📍 ที่ไหน", value=location, inline=False)
-    embed.add_field(name="⏰ เวลาเท่าไหร่", value=time, inline=False)
-    
-    if note != "-":
-        embed.add_field(name="📌 หมายเหตุตั้งต้น", value=note, inline=False)
+class CreateMeetupModal(discord.ui.Modal, title='สร้างการนัดหมาย'):
+    topic = discord.ui.TextInput(
+        label='หัวข้อการนัดหมาย',
+        style=discord.TextStyle.short,
+        placeholder='เช่น ตีป้อม, กินหมูกระทะ, ดูหนัง',
+        required=True,
+        max_length=100,
+    )
+    location = discord.ui.TextInput(
+        label='สถานที่',
+        style=discord.TextStyle.short,
+        placeholder='เช่น หอ A, ร้านประจำ, Discord',
+        required=True,
+        max_length=100,
+    )
+    time_str = discord.ui.TextInput(
+        label='เวลา',
+        style=discord.TextStyle.short,
+        placeholder='เช่น 20:00, วันนี้ทุ่มตรง',
+        required=True,
+        max_length=50,
+    )
+    note = discord.ui.TextInput(
+        label='หมายเหตุ (ใส่หรือไม่ใส่ก็ได้)',
+        style=discord.TextStyle.long,
+        placeholder='เช่น ใครสายจ่ายค่าข้าว...',
+        required=False,
+        max_length=300,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        topic_val = self.topic.value
+        location_val = self.location.value
+        time_val = self.time_str.value
+        note_val = self.note.value if self.note.value else "-"
+
+        embed = discord.Embed(title=f"📢 **{topic_val}**", color=discord.Color.blue())
+        embed.add_field(name="📍 ที่ไหน", value=location_val, inline=False)
+        embed.add_field(name="⏰ เวลาเท่าไหร่", value=time_val, inline=False)
         
-    embed.add_field(name="👥 ใครไปบ้าง", value="-", inline=False)
-    embed.add_field(name="📝 หมายเหตุเพิ่มเติม", value="-", inline=False)
-    embed.set_footer(text=f"สร้างโดย {interaction.user.display_name}")
-    
-    view = MeetupView()
-    await interaction.response.send_message(embed=embed, view=view)
+        if note_val != "-":
+            embed.add_field(name="📌 หมายเหตุตั้งต้น", value=note_val, inline=False)
+            
+        embed.add_field(name="👥 ใครไปบ้าง", value="-", inline=False)
+        embed.add_field(name="📝 หมายเหตุเพิ่มเติม", value="-", inline=False)
+        embed.set_footer(text=f"สร้างโดย {interaction.user.display_name}")
+        
+        view = MeetupView()
+        await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="นัดเพื่อน", description="เปิดหน้าต่าง UI สร้างการนัดหมาย")
+async def meetup(interaction: discord.Interaction):
+    await interaction.response.send_modal(CreateMeetupModal())
 
 async def fetch_major_movies():
     url = "https://www.majorcineplex.com/cinema/bigc-lopburi/"

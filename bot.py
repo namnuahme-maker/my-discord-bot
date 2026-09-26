@@ -239,11 +239,10 @@ async def check_movies_cmd(interaction: discord.Interaction):
         await interaction.followup.send("ไม่พบข้อมูลรอบหนังในขณะนี้")
         return
         
-    messages_embeds = []
-    current_batch = []
-    
-    # หน้าแรกใส่หัวข้อนำหน้าหน่อย
-    await interaction.followup.send("🍿 **รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้**")
+    # หน้าแรกใส่หัวข้อนำหน้า
+    embeds = []
+    intro_embed = discord.Embed(title="🍿 รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้", color=discord.Color.red())
+    embeds.append(intro_embed)
     
     for movie in movies:
         embed = discord.Embed(title=f"🎬 {movie['name']}", color=discord.Color.red())
@@ -253,21 +252,12 @@ async def check_movies_cmd(interaction: discord.Interaction):
         embed.add_field(name="⏰ รอบฉาย", value=showtimes_fmt, inline=False)
         
         if movie['image']:
-            embed.set_thumbnail(url=movie['image']) # กลับไปใช้รูปเล็กด้านขวา
+            embed.set_thumbnail(url=movie['image'])
             
-        current_batch.append(embed)
+        embeds.append(embed)
         
-        # ส่งทีละ 2 เรื่อง เพื่อไม่ให้ดิสคอร์ดซ่อนรูป และไม่ให้แชทรกลงมาเกินไป
-        if len(current_batch) == 2:
-            messages_embeds.append(current_batch)
-            current_batch = []
-            
-    if current_batch:
-        messages_embeds.append(current_batch)
-        
-    # ส่งข้อความ
-    for batch in messages_embeds:
-        await interaction.followup.send(embeds=batch)
+    # ส่งทั้งหมดในข้อความเดียว (discord รองรับสูงสุด 10 embeds ต่อข้อความ)
+    await interaction.followup.send(embeds=embeds[:10])
 
 if __name__ == '__main__':
     keep_alive()

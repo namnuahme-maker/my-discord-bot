@@ -243,19 +243,22 @@ async def check_movies_cmd(interaction: discord.Interaction):
     current_batch = []
     
     # หน้าแรกใส่หัวข้อนำหน้าหน่อย
-    intro_embed = discord.Embed(title="🍿 รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้", color=discord.Color.red())
-    current_batch.append(intro_embed)
+    await interaction.followup.send("🍿 **รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้**")
     
     for movie in movies:
         embed = discord.Embed(title=f"🎬 {movie['name']}", color=discord.Color.red())
-        embed.add_field(name="รอบฉาย", value=", ".join(movie['showtimes']), inline=False)
+        
+        # จัดข้อความรอบฉายให้เป็นป้ายกำกับสวยๆ
+        showtimes_fmt = " ".join([f"` {t} `" for t in movie['showtimes']])
+        embed.add_field(name="⏰ รอบฉาย", value=showtimes_fmt, inline=False)
+        
         if movie['image']:
-            embed.set_image(url=movie['image'])
+            embed.set_thumbnail(url=movie['image']) # กลับไปใช้รูปเล็กด้านขวา
             
         current_batch.append(embed)
         
-        # discord ลิมิตข้อความละไม่เกิน 10 embeds แต่เราปรับลดเหลือ 3 เพื่อไม่ให้รูปโดนซ่อน
-        if len(current_batch) == 3:
+        # ส่งทีละ 2 เรื่อง เพื่อไม่ให้ดิสคอร์ดซ่อนรูป และไม่ให้แชทรกลงมาเกินไป
+        if len(current_batch) == 2:
             messages_embeds.append(current_batch)
             current_batch = []
             

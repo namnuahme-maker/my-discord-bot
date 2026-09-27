@@ -1716,18 +1716,9 @@ class MyBot(commands.Bot):
             return
 
         try:
-            url = (
-                f"https://api.open-meteo.com/v1/forecast?"
-                f"latitude={self.weather_lat}&longitude={self.weather_lon}"
-                f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
-                f"&hourly=precipitation_probability,weather_code"
-                f"&timezone=Asia%2FBangkok&forecast_days=2"
-            )
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        return
-                    data = await response.json()
+            data, _ = await _fetch_weather_and_aq_data(self.weather_lat, self.weather_lon, forecast_days=2)
+            if not data:
+                return
 
             now_str = now.strftime("%Y-%m-%dT%H:00")
             hourly_data = data.get("hourly", {})
@@ -1968,35 +1959,7 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
     buddhist_year = now.year + 543
     date_header = f"วัน{day_name}ที่ {now.day} {month_name} {buddhist_year}"
 
-    weather_url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lat}&longitude={lon}"
-        f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
-        f"&hourly=temperature_2m,precipitation_probability,weather_code"
-        f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-        f"&timezone=Asia%2FBangkok&forecast_days=1"
-    )
-    aq_url = (
-        f"https://air-quality-api.open-meteo.com/v1/air-quality?"
-        f"latitude={lat}&longitude={lon}"
-        f"&current=pm2_5,pm10,us_aqi&timezone=Asia%2FBangkok"
-    )
-
-    data = {}
-    aq_data = {}
-    try:
-        async with aiohttp.ClientSession() as session:
-            w_resp, aq_resp = await asyncio.gather(
-                session.get(weather_url),
-                session.get(aq_url),
-                return_exceptions=True
-            )
-            if not isinstance(w_resp, Exception) and w_resp.status == 200:
-                data = await w_resp.json()
-            if not isinstance(aq_resp, Exception) and aq_resp.status == 200:
-                aq_data = await aq_resp.json()
-    except Exception as e:
-        print(f"Error fetching morning briefing data: {e}")
+    data, aq_data = await _fetch_weather_and_aq_data(lat, lon, forecast_days=1)
 
     current = data.get("current", {})
     temp = current.get("temperature_2m", "-")
@@ -2356,8 +2319,9 @@ async def set_movie_channel(interaction: discord.Interaction, channel: discord.T
 
 async def fetch_major_movies():
     url = "https://www.majorcineplex.com/cinema/bigc-lopburi/"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DiscordMeetupBot/1.0"}
+    async with aiohttp.ClientSession(headers=headers, connector=aiohttp.TCPConnector(ssl=False)) as session:
+        async with session.get(url, timeout=15) as response:
             html = await response.text()
             soup = BeautifulSoup(html, 'html.parser')
 
@@ -2449,6 +2413,132 @@ async def check_movies_cmd(interaction: discord.Interaction):
     await interaction.followup.send(embeds=embeds[:10], view=view)
 
 # ==================== แจ้งเตือนฝนตก & เช็คสภาพอากาศ ====================
+
+def _metno_symbol_to_wmo(symbol: str) -> int:
+    """แปลง symbol_code จาก MET Norway เป็นรหัส WMO สำหรับแสดงผลภาษาไทย"""
+    s = (symbol or "").lower()
+    if "thunder" in s:
+        return 95
+    if "heavyrain" in s:
+        return 65
+    if "rainshowers" in s:
+        return 80
+    if "lightrain" in s or "drizzle" in s:
+        return 51
+    if "rain" in s or "sleet" in s:
+        return 61
+    if "fog" in s:
+        return 45
+    if "cloudy" in s:
+        return 3
+    if "partlycloudy" in s:
+        return 2
+    if "fair" in s:
+        return 1
+    return 0
+
+
+async def _fetch_weather_and_aq_data(lat: float, lon: float, forecast_days: int = 2) -> tuple[dict, dict]:
+    """ดึงข้อมูลสภาพอากาศและค่าฝุ่น PM 2.5 (รองรับ SSL บน Python 3.14 และมีระบบสำรอง MET Norway หาก Open-Meteo ติด Rate Limit บน Render)"""
+    weather_url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lat}&longitude={lon}"
+        f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m"
+        f"&hourly=temperature_2m,precipitation_probability,weather_code"
+        f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+        f"&timezone=Asia%2FBangkok&forecast_days={forecast_days}"
+    )
+    aq_url = (
+        f"https://air-quality-api.open-meteo.com/v1/air-quality?"
+        f"latitude={lat}&longitude={lon}"
+        f"&current=pm2_5,pm10,us_aqi&timezone=Asia%2FBangkok"
+    )
+    headers = {"User-Agent": "DiscordMeetupWeatherBot/1.0 (https://github.com/namnuahme-maker/my-discord-bot)"}
+    data = {}
+    aq_data = {}
+
+    async with aiohttp.ClientSession(headers=headers, connector=aiohttp.TCPConnector(ssl=False)) as session:
+        w_resp, aq_resp = await asyncio.gather(
+            session.get(weather_url, timeout=12),
+            session.get(aq_url, timeout=12),
+            return_exceptions=True
+        )
+        if not isinstance(w_resp, Exception) and w_resp.status == 200:
+            try:
+                data = await w_resp.json()
+            except Exception:
+                data = {}
+        if not isinstance(aq_resp, Exception) and aq_resp.status == 200:
+            try:
+                aq_data = await aq_resp.json()
+            except Exception:
+                aq_data = {}
+
+        # ระบบสำรองอัตโนมัติ: หาก Open-Meteo ติด Rate Limit (429) บน IP ของ Render ให้ดึงจาก MET Norway แทนทันที
+        if not data or "current" not in data:
+            try:
+                met_url = f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={lat:.4f}&lon={lon:.4f}"
+                async with session.get(met_url, timeout=12) as m_resp:
+                    if m_resp.status == 200:
+                        m_json = await m_resp.json()
+                        ts_list = m_json.get("properties", {}).get("timeseries", [])
+                        if ts_list:
+                            first_det = ts_list[0].get("data", {}).get("instant", {}).get("details", {})
+                            first_next = (
+                                ts_list[0].get("data", {}).get("next_1_hours", {})
+                                or ts_list[0].get("data", {}).get("next_6_hours", {})
+                            )
+                            sym = first_next.get("summary", {}).get("symbol_code", "")
+                            temp_c = first_det.get("air_temperature", 28.0)
+                            rh = first_det.get("relative_humidity", 70.0)
+                            wind_ms = first_det.get("wind_speed", 2.0)
+                            wind_kmh = round(wind_ms * 3.6, 1)
+                            feels = round(temp_c + (0.05 * rh - 2.0), 1)
+
+                            times_out = []
+                            temps_out = []
+                            probs_out = []
+                            codes_out = []
+                            for item in ts_list[:24]:
+                                utc_dt = datetime.fromisoformat(item["time"].replace("Z", "+00:00"))
+                                th_dt = utc_dt.astimezone(THAI_TZ)
+                                times_out.append(th_dt.strftime("%Y-%m-%dT%H:00"))
+                                det = item.get("data", {}).get("instant", {}).get("details", {})
+                                nxt = item.get("data", {}).get("next_1_hours", {}) or item.get("data", {}).get("next_6_hours", {})
+                                t_v = det.get("air_temperature", temp_c)
+                                precip = nxt.get("details", {}).get("precipitation_amount", 0.0) or 0.0
+                                s_code = nxt.get("summary", {}).get("symbol_code", "")
+                                w_c = _metno_symbol_to_wmo(s_code)
+                                prob_v = min(95, int(precip * 40) + (50 if w_c >= 51 else 10)) if (precip > 0 or w_c >= 51) else 10
+                                temps_out.append(t_v)
+                                probs_out.append(prob_v)
+                                codes_out.append(w_c)
+
+                            data = {
+                                "current": {
+                                    "temperature_2m": temp_c,
+                                    "apparent_temperature": feels,
+                                    "relative_humidity_2m": rh,
+                                    "wind_speed_10m": wind_kmh,
+                                    "weather_code": _metno_symbol_to_wmo(sym),
+                                },
+                                "hourly": {
+                                    "time": times_out,
+                                    "temperature_2m": temps_out,
+                                    "precipitation_probability": probs_out,
+                                    "weather_code": codes_out,
+                                },
+                                "daily": {
+                                    "temperature_2m_max": [max(temps_out) if temps_out else temp_c],
+                                    "temperature_2m_min": [min(temps_out) if temps_out else temp_c],
+                                    "precipitation_probability_max": [max(probs_out) if probs_out else 0],
+                                },
+                            }
+            except Exception as e:
+                print(f"Fallback weather API error: {e}", flush=True)
+
+    return data, aq_data
+
 
 def translate_weather_code(code: int) -> str:
     """แปลงรหัสสภาพอากาศ WMO เป็นข้อความภาษาไทยพร้อมอีโมจิ"""
@@ -2559,7 +2649,7 @@ async def generate_weather_map(lat: float, lon: float, zoom: int = 8):
         offset_y = int((ytile_f - center_ty) * 256)
 
         headers = {"User-Agent": "DiscordWeatherBot/1.0"}
-        async with aiohttp.ClientSession(headers=headers) as session:
+        async with aiohttp.ClientSession(headers=headers, connector=aiohttp.TCPConnector(ssl=False)) as session:
             radar_path = None
             try:
                 async with session.get("https://api.rainviewer.com/public/weather-maps.json", timeout=8) as r:
@@ -2695,33 +2785,10 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
     target_lon = lon if lon is not None else (bot.weather_lon if bot.weather_lon is not None else 100.6534)
 
     try:
-        weather_url = (
-            f"https://api.open-meteo.com/v1/forecast?"
-            f"latitude={target_lat}&longitude={target_lon}"
-            f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m"
-            f"&hourly=temperature_2m,precipitation_probability,weather_code"
-            f"&timezone=Asia%2FBangkok&forecast_days=2"
-        )
-        aq_url = (
-            f"https://air-quality-api.open-meteo.com/v1/air-quality?"
-            f"latitude={target_lat}&longitude={target_lon}"
-            f"&current=pm2_5,pm10,us_aqi&timezone=Asia%2FBangkok"
-        )
-
-        async with aiohttp.ClientSession() as session:
-            w_resp, aq_resp = await asyncio.gather(
-                session.get(weather_url),
-                session.get(aq_url),
-                return_exceptions=True
-            )
-            if isinstance(w_resp, Exception) or w_resp.status != 200:
-                await interaction.followup.send("❌ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้")
-                return
-            data = await w_resp.json()
-
-            aq_data = {}
-            if not isinstance(aq_resp, Exception) and aq_resp.status == 200:
-                aq_data = await aq_resp.json()
+        data, aq_data = await _fetch_weather_and_aq_data(target_lat, target_lon, forecast_days=2)
+        if not data or "current" not in data:
+            await interaction.followup.send("❌ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้")
+            return
 
         current = data.get("current", {})
         temp = current.get("temperature_2m", "-")

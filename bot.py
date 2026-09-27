@@ -2805,9 +2805,23 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
 
 # ==================== รัน ====================
 
+def _reset_bot_session():
+    """รีเซ็ต HTTP Session และสถานะภายในของบอทเพื่อให้ลองล็อกอินใหม่ได้โดยไม่เกิด Session is closed"""
+    try:
+        bot._closing_task = None
+        bot.http.connector = discord.utils.MISSING
+        bot.clear()
+    except Exception:
+        pass
+
 if __name__ == '__main__':
     keep_alive()
     clean_token = TOKEN.strip().strip('"').strip("'")
+    if clean_token.startswith("DISCORD_TOKEN="):
+        clean_token = clean_token.split("=", 1)[1].strip().strip('"').strip("'")
+    if clean_token.lower().startswith("bot "):
+        clean_token = clean_token[4:].strip()
+
     if clean_token == 'YOUR_BOT_TOKEN_HERE' or not clean_token:
         err_msg = "❌ ไม่พบค่า DISCORD_TOKEN! กรุณาตั้งค่า DISCORD_TOKEN ในเมนู Environment ของ Render.com"
         print(err_msg, flush=True)
@@ -2817,9 +2831,12 @@ if __name__ == '__main__':
             time.sleep(60)
     else:
         import time
+        discord.utils.setup_logging()
+        attempt = 0
         while True:
+            attempt += 1
             try:
-                bot.run(clean_token)
+                bot.run(clean_token, log_handler=None)
                 break
             except discord.LoginFailure as e:
                 err_msg = f"❌ DISCORD_TOKEN ไม่ถูกต้อง (ถูก Reset หรือก๊อปปี้มาไม่ครบ): {e}"
@@ -2828,18 +2845,19 @@ if __name__ == '__main__':
                 while True:
                     time.sleep(60)
             except discord.HTTPException as e:
+                status_code = getattr(e, 'status', 429)
                 err_msg = (
-                    f"⚠️ Discord บล็อก IP ชั่วคราว (HTTP {getattr(e, 'status', '')} Rate Limit ของเซิร์ฟเวอร์ Render ฟรี) "
-                    f"— กำลังรอ 60 วินาทีเพื่อลองเชื่อมต่อใหม่อัตโนมัติ... (รายละเอียด: {e})"
+                    f"⚠️ Discord บล็อก IP ของเครื่อง Render ชั่วคราว (HTTP {status_code} Rate Limit - ครั้งที่ {attempt}) "
+                    f"— กำลังรอ 60 วินาทีเพื่อลองเชื่อมต่อใหม่อัตโนมัติ... "
+                    f"(💡 หากติดนาน แนะนำให้สร้าง Web Service ใหม่บน Render โดยเลือก Region เป็น Singapore หรือ Frankfurt เพื่อเปลี่ยน IP)"
                 )
                 print(err_msg, flush=True)
                 set_bot_status(False, err_msg)
                 time.sleep(60)
-                # รีเซ็ตสถานะภายในของบอทก่อนลองเชื่อมต่อใหม่
-                bot.clear()
+                _reset_bot_session()
             except Exception as e:
-                err_msg = f"❌ เชื่อมต่อ Discord ไม่สำเร็จ: {e} — รอ 30 วินาทีเพื่อลองใหม่..."
+                err_msg = f"❌ เชื่อมต่อ Discord ไม่สำเร็จ (ครั้งที่ {attempt}): {e} — รอ 30 วินาทีเพื่อลองใหม่..."
                 print(err_msg, flush=True)
                 set_bot_status(False, err_msg)
                 time.sleep(30)
-                bot.clear()
+                _reset_bot_session()

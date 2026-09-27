@@ -9,8 +9,8 @@ import discord
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+        sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
     except Exception:
         pass
 from discord.ext import commands, tasks
@@ -66,6 +66,11 @@ def _progress_bar(current: int, total: int = None, length: int = 10) -> str:
         return f"{bar} {current} คน"
 
 from keep_alive import keep_alive
+try:
+    from keep_alive import set_bot_status
+except ImportError:
+    def set_bot_status(connected: bool, message: str, bot_name: str = None):
+        pass
 
 # ==================== ตั้งค่า Timezone & Environment ====================
 
@@ -1616,7 +1621,6 @@ class MyBot(commands.Bot):
         self.weather_lon = config.get("weather_lon")
 
     async def setup_hook(self):
-        await self.tree.sync()
         self.add_view(MeetupView())
         self.add_view(CheckinMeetupView())
         self.check_movies.start()
@@ -1624,9 +1628,19 @@ class MyBot(commands.Bot):
         self.check_reminders.start()
         self.morning_briefing.start()
 
+        async def _sync_commands():
+            try:
+                synced = await self.tree.sync()
+                print(f"✅ ซิงค์คำสั่ง Slash Commands สำเร็จ ({len(synced)} คำสั่ง)", flush=True)
+            except Exception as e:
+                print(f"⚠️ Warning syncing commands: {e}", flush=True)
+
+        asyncio.create_task(_sync_commands())
+
     async def on_ready(self):
-        print(f'Logged in as {self.user} (ID: {self.user.id})')
-        print('------')
+        set_bot_status(True, "✅ เชื่อมต่อกับ Discord สำเร็จและพร้อมใช้งาน!", f"{self.user} (ID: {self.user.id})")
+        print(f'✅ บอทออนไลน์แล้ว! Logged in as {self.user} (ID: {self.user.id})', flush=True)
+        print('------', flush=True)
 
     async def _resolve_channel(self, channel_id: int):
         if not channel_id:
@@ -2793,7 +2807,39 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
 
 if __name__ == '__main__':
     keep_alive()
-    if TOKEN == 'YOUR_BOT_TOKEN_HERE' or not TOKEN:
-        print("กรุณาใส่ Token ในไฟล์ .env หรือตั้งค่า DISCORD_TOKEN ใน Environment Variables")
+    clean_token = TOKEN.strip().strip('"').strip("'")
+    if clean_token == 'YOUR_BOT_TOKEN_HERE' or not clean_token:
+        err_msg = "❌ ไม่พบค่า DISCORD_TOKEN! กรุณาตั้งค่า DISCORD_TOKEN ในเมนู Environment ของ Render.com"
+        print(err_msg, flush=True)
+        set_bot_status(False, err_msg)
+        import time
+        while True:
+            time.sleep(60)
     else:
-        bot.run(TOKEN)
+        import time
+        while True:
+            try:
+                bot.run(clean_token)
+                break
+            except discord.LoginFailure as e:
+                err_msg = f"❌ DISCORD_TOKEN ไม่ถูกต้อง (ถูก Reset หรือก๊อปปี้มาไม่ครบ): {e}"
+                print(err_msg, flush=True)
+                set_bot_status(False, err_msg)
+                while True:
+                    time.sleep(60)
+            except discord.HTTPException as e:
+                err_msg = (
+                    f"⚠️ Discord บล็อก IP ชั่วคราว (HTTP {getattr(e, 'status', '')} Rate Limit ของเซิร์ฟเวอร์ Render ฟรี) "
+                    f"— กำลังรอ 60 วินาทีเพื่อลองเชื่อมต่อใหม่อัตโนมัติ... (รายละเอียด: {e})"
+                )
+                print(err_msg, flush=True)
+                set_bot_status(False, err_msg)
+                time.sleep(60)
+                # รีเซ็ตสถานะภายในของบอทก่อนลองเชื่อมต่อใหม่
+                bot.clear()
+            except Exception as e:
+                err_msg = f"❌ เชื่อมต่อ Discord ไม่สำเร็จ: {e} — รอ 30 วินาทีเพื่อลองใหม่..."
+                print(err_msg, flush=True)
+                set_bot_status(False, err_msg)
+                time.sleep(30)
+                bot.clear()

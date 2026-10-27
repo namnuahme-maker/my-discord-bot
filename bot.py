@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone, time as dt_time
 from urllib.parse import quote
 from PIL import Image, ImageDraw
+from ai_chat import setup_ai_chat, handle_ai_message
 
 # Icons and emojis for embed buttons and headers
 EMOJI = {
@@ -1607,6 +1608,7 @@ class MyBot(commands.Bot):
             self.weather_channel_id = int(w_channel_id)
         self.weather_lat = config.get("weather_lat")
         self.weather_lon = config.get("weather_lon")
+        self.ai_channel_id = None
 
     async def setup_hook(self):
         self.add_view(MeetupView())
@@ -1629,6 +1631,14 @@ class MyBot(commands.Bot):
         set_bot_status(True, "✅ Connected to Discord and ready!", f"{self.user} (ID: {self.user.id})")
         print(f'✅ Bot online! Logged in as {self.user} (ID: {self.user.id})', flush=True)
         print('------', flush=True)
+        try:
+            await self.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Night City burn 💥 | /chat"))
+        except Exception as e:
+            print(f"Warning setting presence: {e}")
+
+    async def on_message(self, message: discord.Message):
+        await self.process_commands(message)
+        await handle_ai_message(self, message)
 
     async def _resolve_channel(self, channel_id: int):
         if not channel_id:
@@ -2079,6 +2089,7 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
 
 
 bot = MyBot()
+setup_ai_chat(bot, load_config, save_config)
 
 # ==================== Slash Commands ====================
 

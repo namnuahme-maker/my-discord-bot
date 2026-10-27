@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone, time as dt_time
 from urllib.parse import quote
 from PIL import Image, ImageDraw
 
-# ไอคอนและอีโมจิสม่ำเสมอสำหรับปุ่มและหัวข้อใน Embed
+# Icons and emojis for embed buttons and headers
 EMOJI = {
     "join": "✅",
     "tentative": "🤔",
@@ -38,10 +38,10 @@ EMOJI = {
 }
 
 def _theme_color(info: dict) -> int:
-    """คืนค่าสีธีมของ Embed ให้สอดคล้องกับสถานะการนัดหมาย:
-    - สีเขียวมรกต (0x2ECC71) : โหมดเช็คอิน (ถึงเวลานัดหมายแล้ว)
-    - สีส้มแจ้งเตือน (0xE67E22): จำนวนคนครบเต็มจำนวนสูงสุดแล้ว (Full / คิวสำรอง)
-    - สีน้ำเงินคราม (0x5865F2): เปิดรับลงชื่อปกติ (Default)
+    """Return embed theme color based on meetup status:
+    - Emerald Green (0x2ECC71): Check-in mode (meetup time now).
+    - Orange (0xE67E22): Max limit reached (full / waitlist).
+    - Blurple (0x5865F2): Normal sign-up open (default).
     """
     if info.get("checkin_mode"):
         return 0x2ECC71
@@ -51,19 +51,19 @@ def _theme_color(info: dict) -> int:
     return 0x5865F2
 
 def _progress_bar(current: int, total: int = None, length: int = 10) -> str:
-    """สร้าง Progress Bar แบบข้อความ (เช่น ██████░░░░ 3/5 คน (60%))"""
+    """Create text progress bar (e.g. ██████░░░░ 3/5 (60%))"""
     if total and total > 0:
         ratio = max(0.0, min(1.0, current / total))
         filled = int(round(ratio * length))
         empty = length - filled
         bar = "█" * filled + "░" * empty
-        status_suffix = " (เต็ม!)" if current >= total else f" ({int(round(ratio * 100))}%)"
-        return f"{bar} {current}/{total} คน{status_suffix}"
+        status_suffix = " (FULL!)" if current >= total else f" ({int(round(ratio * 100))}%)"
+        return f"{bar} {current}/{total}{status_suffix}"
     else:
         filled = max(0, min(length, current))
         empty = length - filled
         bar = "█" * filled + "░" * empty
-        return f"{bar} {current} คน"
+        return f"{bar} {current}"
 
 from keep_alive import keep_alive
 try:
@@ -72,13 +72,13 @@ except ImportError:
     def set_bot_status(connected: bool, message: str, bot_name: str = None):
         pass
 
-# ==================== ตั้งค่า Timezone & Environment ====================
+# ==================== Timezone & Environment ====================
 
-# เวลาประเทศไทย (UTC+7) เพื่อให้ทำงานถูกต้องเสมอแม้รันบนเซิร์ฟเวอร์ Cloud (เช่น Render ที่ใช้ UTC)
+# Thailand time (UTC+7) for consistent schedule across cloud servers
 THAI_TZ = timezone(timedelta(hours=7))
 
 def now_thai() -> datetime:
-    """คืนค่าวันและเวลาปัจจุบันตามเวลาประเทศไทย (UTC+7)"""
+    """Return current datetime in Thailand timezone (UTC+7)."""
     return datetime.now(THAI_TZ)
 
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -88,7 +88,7 @@ MOVIE_CACHE_FILE = os.path.join(DATA_DIR, "movie_cache.json")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 
 def _load_dotenv_fallback(filepath: str):
-    """โหลดค่าจากไฟล์ .env เข้าสู่ os.environ โดยไม่ต้องพึ่งไลบรารีภายนอก"""
+    """Load .env file into os.environ without third-party library."""
     if not os.path.exists(filepath):
         return
     try:
@@ -108,7 +108,7 @@ def _load_dotenv_fallback(filepath: str):
 _load_dotenv_fallback(ENV_FILE)
 TOKEN = os.environ.get("DISCORD_TOKEN", "")
 
-# ==================== ฟังก์ชันจัดการข้อมูล ====================
+# ==================== Data Management Functions ====================
 
 def load_json(filepath, default=None):
     if default is None:
@@ -141,23 +141,23 @@ def load_movie_cache():
 def save_movie_cache(cache_set):
     save_json(MOVIE_CACHE_FILE, list(cache_set))
 
-# ==================== ฟังก์ชันช่วยแปลงเวลา & จัดการ Embed นัดหมาย ====================
+# ==================== Time Helper & Meetup Embed Management ====================
 
 def clean_topic_title(title: str) -> str:
-    """ลบอีโมตนำหน้า (เช่น 📅, 🎬) และช่องว่างส่วนเกินออกจากชื่อหัวข้อนัดหมาย"""
+    """Strip leading emojis and extra whitespace from meetup topic."""
     if not title:
-        return "ไม่ระบุ"
+        return "Untitled"
     cleaned = re.sub(r'^[📅🎬\s]+', '', title).strip()
-    return cleaned if cleaned else "ไม่ระบุ"
+    return cleaned if cleaned else "Untitled"
 
 def parse_thai_meetup_datetime(time_str: str, ref_dt: datetime = None):
     """
-    แปลงข้อความเวลานัดภาษาไทย เช่น 'วันนี้ 20:00', 'พรุ่งนี้ เวลา 14:30', 'จันทร์ ที่28 ตอน 11:30'
-    ให้เป็น datetime (THAI_TZ) เพื่อใช้ตั้งเวลาแจ้งเตือนล่วงหน้าอัตโนมัติ
+    Parse meetup time string (e.g. 'today 20:00', 'tomorrow 14:30', '28th 11:30')
+    into datetime (THAI_TZ) for auto-reminder scheduling.
     """
     if not time_str:
         return None
-    if any(k in time_str for k in ("ยังไม่ระบุเวลา", "รอนัดหมาย", "ยังไม่แน่ใจ")):
+    if any(k in time_str.lower() for k in ("tbd", "tba", "unknown", "not set", "not sure")):
         return None
 
     if ref_dt is None:
@@ -167,7 +167,7 @@ def parse_thai_meetup_datetime(time_str: str, ref_dt: datetime = None):
     target_date = ref_dt.date()
     explicit_date = False
 
-    # 1. ตรวจหาวันที่แบบ DD/MM/YYYY หรือ DD/MM
+    # 1. Match date DD/MM/YYYY or DD/MM
     date_slash = re.search(r'(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?', text)
     if date_slash:
         day_val = int(date_slash.group(1))
@@ -189,17 +189,17 @@ def parse_thai_meetup_datetime(time_str: str, ref_dt: datetime = None):
         text_for_time = text[:date_slash.start()] + " " + text[date_slash.end():]
     else:
         text_for_time = text
-        if "พรุ่งนี้" in text:
+        if "tomorrow" in text.lower():
             target_date = ref_dt.date() + timedelta(days=1)
             explicit_date = True
-        elif "มะรืน" in text:
+        elif "day after tomorrow" in text.lower():
             target_date = ref_dt.date() + timedelta(days=2)
             explicit_date = True
-        elif "วันนี้" in text:
+        elif "today" in text.lower() or "tonight" in text.lower():
             target_date = ref_dt.date()
             explicit_date = True
         else:
-            day_match = re.search(r'(?:วันที่|ที่)\s*(\d{1,2})', text)
+            day_match = re.search(r'(?:day|date|at|on)?\s*(\d{1,2})', text, re.IGNORECASE)
             if day_match:
                 day_num = int(day_match.group(1))
                 year_val = ref_dt.year
@@ -217,48 +217,48 @@ def parse_thai_meetup_datetime(time_str: str, ref_dt: datetime = None):
                     pass
                 text_for_time = text[:day_match.start()] + " " + text[day_match.end():]
 
-    # 2. ตรวจหาเวลา HH:MM หรือ HH.MM
+    # 2. Match time HH:MM or HH.MM
     hour = None
     minute = 0
-    time_match = re.search(r'(?:เวลา|ตอน|เมื่อ)?\s*(\d{1,2})\s*[:.]\s*(\d{2})', text_for_time)
+    time_match = re.search(r'(?:time|at)?\s*(\d{1,2})\s*[:.]\s*(\d{2})', text_for_time, re.IGNORECASE)
     if time_match:
         h_val = int(time_match.group(1))
         m_val = int(time_match.group(2))
         if 0 <= h_val <= 23 and 0 <= m_val <= 59:
             hour, minute = h_val, m_val
     else:
-        # ตรวจหาคำบอกเวลาภาษาพูดทั่วไป (รองรับทั้งตัวเลขและคำอ่านตัวเลขไทย)
+        # Match spoken numbers (Thai + English)
         thai_num_map = [
-            ("สิบเอ็ด", "11"), ("สิบ", "10"), ("เก้า", "9"), ("แปด", "8"),
-            ("เจ็ด", "7"), ("หก", "6"), ("ห้า", "5"), ("สี่", "4"),
-            ("สาม", "3"), ("สอง", "2"), ("หนึ่ง", "1"),
+            ("eleven", "11"), ("ten", "10"), ("nine", "9"), ("eight", "8"),
+            ("seven", "7"), ("six", "6"), ("five", "5"), ("four", "4"),
+            ("three", "3"), ("two", "2"), ("one", "1"),
         ]
         norm_time_text = text_for_time
         for word, digit in thai_num_map:
             norm_time_text = norm_time_text.replace(word, digit)
 
-        if "เที่ยงคืน" in norm_time_text:
+        if "midnight" in norm_time_text.lower():
             hour, minute = 0, 0
-        elif "เที่ยง" in norm_time_text:
+        elif "noon" in norm_time_text.lower() or "midday" in norm_time_text.lower():
             hour, minute = 12, 0
-        elif "บ่ายโมง" in norm_time_text:
+        elif "1pm" in norm_time_text.lower():
             hour, minute = 13, 0
         else:
-            afternoon_m = re.search(r'บ่าย\s*(\d{1,2})', norm_time_text)
-            night_m = re.search(r'(\d{1,2})\s*ทุ่ม', norm_time_text)
-            evening_m = re.search(r'(\d{1,2})\s*โมงเย็น', norm_time_text)
-            morning_m = re.search(r'(\d{1,2})\s*โมงเช้า', norm_time_text)
+            afternoon_m = re.search(r'(\d{1,2})\s*pm', norm_time_text, re.IGNORECASE)
+            night_m = None
+            evening_m = None
+            morning_m = re.search(r'(\d{1,2})\s*am', norm_time_text, re.IGNORECASE)
             if afternoon_m:
                 hour = 12 + int(afternoon_m.group(1))
             elif night_m:
                 hour = 18 + int(night_m.group(1))
-            elif "ทุ่มนึง" in norm_time_text or "1ทุ่ม" in norm_time_text:
+            elif "7pm" in norm_time_text.lower():
                 hour = 19
             elif evening_m:
                 hour = 12 + int(evening_m.group(1))
             elif morning_m:
                 hour = int(morning_m.group(1))
-            if "ครึ่ง" in norm_time_text and hour is not None:
+            if "half" in norm_time_text.lower() and hour is not None:
                 minute = 30
 
     if hour is None or not (0 <= hour <= 23):
@@ -268,14 +268,14 @@ def parse_thai_meetup_datetime(time_str: str, ref_dt: datetime = None):
         target_date.year, target_date.month, target_date.day,
         hour, minute, tzinfo=THAI_TZ
     )
-    # ถ้าไม่ได้ระบุวันชัดเจน (พิมพ์แค่เวลา) แล้วเวลานั้นของวันนี้ผ่านไปแล้ว ให้เลื่อนเป็นวันพรุ่งนี้
+    # If no explicit date and time passed today, advance to tomorrow
     if not explicit_date and result_dt < ref_dt:
         result_dt += timedelta(days=1)
 
     return result_dt
 
 def extract_mentions(text: str) -> list[str]:
-    """ดึงรายการ <@user_id> ทั้งหมดจากข้อความโดยรักษาลำดับและไม่ซ้ำกัน"""
+    """Extract unique <@user_id> mentions preserving order."""
     if not text:
         return []
     found = re.findall(r'<@!?\d+>', text)
@@ -286,7 +286,7 @@ def extract_mentions(text: str) -> list[str]:
     return unique
 
 def parse_meetup_embed(embed: discord.Embed) -> dict:
-    """อ่านข้อมูลทั้งหมดจากการ์ด Embed นัดหมาย"""
+    """Read all data from meetup embed card."""
     is_movie = "🎬" in (embed.title or "")
     topic = clean_topic_title(embed.title or "")
     location = ""
@@ -298,40 +298,40 @@ def parse_meetup_embed(embed: discord.Embed) -> dict:
     checkins = []
     checkin_mode = False
     max_limit = None
-    friend_notes = "*ยังไม่มีหมายเหตุ*"
-    created_by = "ไม่ทราบ"
+    friend_notes = "*No notes yet*"
+    created_by = "Unknown"
 
     for field in embed.fields:
         fname = field.name or ""
         fval = field.value or ""
-        if "สถานที่" in fname:
+        if "Location" in fname:
             location = fval.replace("```", "").strip()
-        elif "เวลานัด" in fname:
+        elif "Time" in fname:
             time_val = fval.replace("```", "").strip()
-        elif "📌 หมายเหตุ" in fname:
+        elif "📌 Note" in fname:
             pin_note = re.sub(r'^>\s*', '', fval).strip()
-        elif "จำนวนคน" in fname:
+        elif "People" in fname or "Count" in fname:
             m_limit = re.search(r'(\d+)\s*/\s*(\d+)', fval)
             if m_limit:
                 max_limit = int(m_limit.group(2))
-        elif "ใครไปบ้าง" in fname:
+        elif "Going" in fname:
             going = extract_mentions(fval)
-        elif "รายชื่อคิวสำรอง" in fname or (fname.startswith("⏳") and "คิวที่" in fval):
+        elif "Waitlist" in fname or (fname.startswith("⏳") and ("Queue" in fval or "#" in fval)):
             waitlist = extract_mentions(fval)
-        elif "ไม่แน่ใจ / ขอดูก่อน" in fname:
+        elif "Tentative" in fname:
             tentative = extract_mentions(fval)
-        elif "เช็คอินแล้ว" in fname:
+        elif "Checked In" in fname:
             checkin_mode = True
-        elif "เช็คอินถึงที่นัดแล้ว" in fname:
+        elif "Arrived" in fname:
             checkin_mode = True
             for m in extract_mentions(fval):
                 if not any(c["mention"] == m for c in checkins):
                     checkins.append({"mention": m, "rest": ""})
-        elif "หมายเหตุจากเพื่อนๆ" in fname:
+        elif "Friend Notes" in fname:
             friend_notes = fval
 
     if embed.footer and embed.footer.text:
-        created_by = embed.footer.text.replace("🎯 สร้างโดย", "").split("•")[0].strip()
+        created_by = embed.footer.text.replace("🎯 Created by", "").split("•")[0].strip()
 
     return {
         "is_movie": is_movie,
@@ -350,7 +350,7 @@ def parse_meetup_embed(embed: discord.Embed) -> dict:
     }
 
 def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
-    """อัปเดตหรือจัดเรียง Fields ในการ์ดนัดหมายให้สวยงามและรองรับโหมดลงชื่อ / โหมดเช็คอิน"""
+    """Update and format fields in meetup card."""
     location = info.get("location", "-")
     time_val = info.get("time_val", "-")
     pin_note = info.get("pin_note")
@@ -360,18 +360,18 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
     checkins = info.get("checkins", [])
     checkin_mode = info.get("checkin_mode", False)
     max_limit = info.get("max_limit")
-    friend_notes = info.get("friend_notes") or "*ยังไม่มีหมายเหตุ*"
+    friend_notes = info.get("friend_notes") or "*No notes yet*"
     count = len(going)
 
     if checkin_mode:
         if count > 0 and len(checkins) >= count:
-            status_line = "🟢 **สถานะ:** ถึงเวลานัดหมายแล้ว (มากันครบทุกคนแล้ว! 🎉)"
+            status_line = "🟢 **Status:** Time now. All arrived! 🎉"
         else:
-            status_line = "🟢 **สถานะ:** ถึงเวลานัดหมายแล้ว (กำลังเปิดเช็คอินหน้างาน 📍)"
+            status_line = "🟢 **Status:** Time now. Check-in open 📍"
     elif max_limit and max_limit > 0 and count >= max_limit:
-        status_line = "🟠 **สถานะ:** จำนวนคนเต็มแล้ว (กดไปด้วยเพื่อเข้าคิวสำรอง ⏳)"
+        status_line = "🟠 **Status:** Full limit reached. Join goes to waitlist ⏳"
     else:
-        status_line = "🔵 **สถานะ:** เปิดรับลงชื่อเข้าร่วมนัดหมาย"
+        status_line = "🔵 **Status:** Open for sign-ups"
 
     new_embed = discord.Embed(
         title=embed.title,
@@ -385,54 +385,54 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
     if embed.footer and embed.footer.text:
         new_embed.set_footer(text=embed.footer.text)
 
-    new_embed.add_field(name=f"{EMOJI['location']} สถานที่", value=f"```{location}```", inline=True)
-    new_embed.add_field(name=f"{EMOJI['time']} เวลานัด", value=f"```{time_val}```", inline=True)
+    new_embed.add_field(name=f"{EMOJI['location']} Location", value=f"```{location}```", inline=True)
+    new_embed.add_field(name=f"{EMOJI['time']} Time", value=f"```{time_val}```", inline=True)
 
     if pin_note:
         new_embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        new_embed.add_field(name="📌 หมายเหตุ", value=f"> {pin_note}", inline=False)
+        new_embed.add_field(name="📌 Note", value=f"> {pin_note}", inline=False)
 
     new_embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
 
-    # จำนวนคน & จำกัดจำนวนคน & สถานะเช็คอิน (แสดงแบบ Progress Bar เสมอ)
+    # Participant count & checkin status (progress bar)
     prog = _progress_bar(count, max_limit, length=10)
     count_str = f"` {prog} `"
 
-    new_embed.add_field(name=f"{EMOJI['count']} จำนวนคน", value=count_str, inline=True)
+    new_embed.add_field(name=f"{EMOJI['count']} People", value=count_str, inline=True)
     if checkin_mode:
-        checkin_bar = _progress_bar(len(checkins), count, length=8) if count > 0 else "0/0 คน"
-        new_embed.add_field(name=f"{EMOJI['checkin']} เช็คอินแล้ว", value=f"` {checkin_bar} `", inline=True)
+        checkin_bar = _progress_bar(len(checkins), count, length=8) if count > 0 else "0/0"
+        new_embed.add_field(name=f"{EMOJI['checkin']} Checked In", value=f"` {checkin_bar} `", inline=True)
         new_embed.add_field(name="\u200b", value="\u200b", inline=True)
     else:
-        new_embed.add_field(name=f"{EMOJI['tentative']} ไม่แน่ใจ", value=f"` {len(tentative)} คน `", inline=True)
+        new_embed.add_field(name=f"{EMOJI['tentative']} Tentative", value=f"` {len(tentative)} `", inline=True)
         if max_limit and max_limit > 0:
-            new_embed.add_field(name=f"{EMOJI['waitlist']} คิวสำรอง", value=f"` {len(waitlist)} คน `", inline=True)
+            new_embed.add_field(name=f"{EMOJI['waitlist']} Waitlist", value=f"` {len(waitlist)} `", inline=True)
         else:
             new_embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-    # รายชื่อคนที่ไปแน่นอน
+    # Confirmed participants
     if going:
         going_val = ">>> " + "\n".join(going)
     else:
-        going_val = "*ยังไม่มีใครลงชื่อ*"
-    new_embed.add_field(name="👥 ใครไปบ้าง (ไปแน่นอน)", value=going_val[:1024], inline=False)
+        going_val = "*No one yet*"
+    new_embed.add_field(name="👥 Going", value=going_val[:1024], inline=False)
 
-    # แสดงรายชื่อคิวสำรอง และ ไม่แน่ใจ / ขอดูก่อน เฉพาะตอนเปิดรับลงชื่อปกติ (เมื่อถึงเวลานัดหมายแล้วจะซ่อนออก)
+    # Show waitlist and tentative only in normal sign-up mode
     if not checkin_mode:
         if (max_limit and max_limit > 0) or waitlist:
             if waitlist:
-                waitlist_val = "\n".join([f"`คิวที่ {idx}:` {m}" for idx, m in enumerate(waitlist, 1)])
+                waitlist_val = "\n".join([f"`Queue #{idx}:` {m}" for idx, m in enumerate(waitlist, 1)])
             else:
-                waitlist_val = "*ว่าง (ยังไม่มีคิวสำรอง)*"
-            new_embed.add_field(name="⏳ รายชื่อคิวสำรอง (เลื่อนขึ้นอัตโนมัติเมื่อมีคนสละสิทธิ์)", value=waitlist_val[:1024], inline=False)
+                waitlist_val = "*Empty (No waitlist)*"
+            new_embed.add_field(name="⏳ Waitlist (Auto-promotes on drop)", value=waitlist_val[:1024], inline=False)
 
         if tentative:
             tentative_val = ">>> " + "\n".join(tentative)
         else:
-            tentative_val = "*ยังไม่มี*"
-        new_embed.add_field(name="🤔 ไม่แน่ใจ / ขอดูก่อน", value=tentative_val[:1024], inline=False)
+            tentative_val = "*None*"
+        new_embed.add_field(name="🤔 Tentative", value=tentative_val[:1024], inline=False)
 
-    # รายชื่อคนที่เช็คอินถึงที่นัดแล้ว (แสดงเฉพาะเมื่อเปิดโหมดเช็คอินแล้ว หรือมีคนเช็คอิน)
+    # Arrived participants
     if checkin_mode or checkins:
         if checkins:
             checkin_lines = [
@@ -440,14 +440,14 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
                 for idx, c in enumerate(checkins, 1)
             ]
             if count > 0 and len(checkins) >= count:
-                checkin_lines.append("🎉 **มากันครบทุกคนแล้ว!**")
+                checkin_lines.append("🎉 **All arrived!**")
             checkin_val = "\n".join(checkin_lines)
         else:
-            checkin_val = "*ยังไม่มีใครกดเช็คอิน*"
-        new_embed.add_field(name="📍 เช็คอินถึงที่นัดแล้ว", value=checkin_val[:1024], inline=False)
+            checkin_val = "*No one checked in yet*"
+        new_embed.add_field(name="📍 Arrived", value=checkin_val[:1024], inline=False)
 
     new_embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-    new_embed.add_field(name="📋 หมายเหตุจากเพื่อนๆ", value=friend_notes[:1024], inline=False)
+    new_embed.add_field(name="📋 Friend Notes", value=friend_notes[:1024], inline=False)
 
     return new_embed
 
@@ -459,7 +459,7 @@ def upsert_meetup_history(
     custom_remind_at: datetime = None,
     reset_reminded: bool = False
 ):
-    """บันทึกหรืออัปเดตข้อมูลนัดหมายลง meetup_history.json (บันทึกเฉพาะนัดหมายที่ยืนยันแล้วเท่านั้น)"""
+    """Save or update meetup record in meetup_history.json (confirmed only)."""
     info = parse_meetup_embed(embed)
     topic = info["topic"]
     location = info["location"]
@@ -476,7 +476,7 @@ def upsert_meetup_history(
     if custom_remind_at is not None:
         remind_at_iso = custom_remind_at.isoformat()
     elif meetup_dt is not None:
-        # ตั้งเตือนล่วงหน้าอัตโนมัติ 30 นาทีก่อนถึงเวลานัด
+        # Schedule auto reminder 30 minutes before meetup time
         auto_remind_dt = meetup_dt - timedelta(minutes=30)
         remind_at_iso = auto_remind_dt.isoformat()
     else:
@@ -485,7 +485,7 @@ def upsert_meetup_history(
     history = load_json(HISTORY_FILE, [])
     found_entry = None
 
-    # ค้นหาจาก message_id ก่อน ถ้าไม่มีค่อยหาจาก topic + location + guild_id
+    # Match by message_id first; fallback to topic + location + guild_id
     for entry in reversed(history):
         if msg_str and entry.get("message_id") == msg_str:
             found_entry = entry
@@ -563,16 +563,16 @@ def upsert_meetup_history(
     history = history[-50:]
     save_json(HISTORY_FILE, history)
 
-# ==================== Views & Modals สำหรับการนัดหมาย ====================
+# ==================== Views & Modals for Meetups ====================
 
 async def _open_notify_panel(interaction: discord.Interaction):
-    """เปิดแผงควบคุมการแจ้งเตือนสำหรับการ์ดนัดหมาย"""
+    """Open notification settings panel for meetup card."""
     embed = interaction.message.embeds[0]
     info = parse_meetup_embed(embed)
 
     history = load_json(HISTORY_FILE, [])
     msg_str = str(interaction.message.id)
-    remind_status = "ยังไม่ได้ตั้งเวลาเตือน (หรือรูปแบบเวลาไม่ระบุชัดเจน)"
+    remind_status = "Not scheduled"
     for entry in reversed(history):
         if entry.get("message_id") == msg_str or (
             clean_topic_title(entry.get("topic", "")) == info["topic"]
@@ -583,20 +583,20 @@ async def _open_notify_panel(interaction: discord.Interaction):
             if r_iso:
                 try:
                     r_dt = datetime.fromisoformat(r_iso).astimezone(THAI_TZ)
-                    state_txt = "✅ แจ้งเตือนไปแล้ว" if reminded else "⏳ รอแจ้งเตือนอัตโนมัติ"
-                    remind_status = f"`{r_dt.strftime('%d/%m/%Y %H:%M')} น.` ({state_txt})"
+                    state_txt = "✅ Sent" if reminded else "⏳ Scheduled"
+                    remind_status = f"`{r_dt.strftime('%d/%m/%Y %H:%M')}` ({state_txt})"
                 except Exception:
                     pass
             break
 
     panel_embed = discord.Embed(
-        title=f"🔔 จัดการการแจ้งเตือน: {info['topic']}",
+        title=f"🔔 Notification Panel: {info['topic']}",
         description=(
-            "เลือกรูปแบบการแจ้งเตือนด้านล่าง เพื่อลดการรบกวนคนอื่นในเซิร์ฟเวอร์:\n"
+            "Select notification target to avoid spamming server:\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👥 **คนที่ไปแน่นอน:** `{len(info['going'])} คน` (เช็คอินแล้ว `{len(info['checkins'])} คน`)\n"
-            f"🤔 **ไม่แน่ใจ / คิวสำรอง:** `{len(info['tentative']) + len(info['waitlist'])} คน`\n"
-            f"⏰ **ตั้งเวลาเตือนอัตโนมัติ:** {remind_status}"
+            f"👥 **Going:** `{len(info['going'])}` (Checked in: `{len(info['checkins'])}`)\n"
+            f"🤔 **Tentative / Waitlist:** `{len(info['tentative']) + len(info['waitlist'])}`\n"
+            f"⏰ **Auto Reminder:** {remind_status}"
         ),
         color=0x5865F2
     )
@@ -605,17 +605,17 @@ async def _open_notify_panel(interaction: discord.Interaction):
 
 
 async def _open_update_options(interaction: discord.Interaction):
-    """เปิดแผงตัวเลือกในปุ่ม '✏️ อัพเดทข้อมูล' เพื่อเลือกเปลี่ยนเป็นโหมดถึงเวลานัด (เช็คอิน) หรือแก้ไขข้อมูล"""
+    """Open options for '✏️ Update' button to toggle check-in mode or edit details."""
     embed = interaction.message.embeds[0]
     info = parse_meetup_embed(embed)
-    mode_str = "📍 โหมดเช็คอินหน้างาน (ถึงเวลานัดหมายแล้ว)" if info["checkin_mode"] else "📝 โหมดเปิดรับลงชื่อปกติ"
+    mode_str = "📍 Check-in Mode (Time now)" if info["checkin_mode"] else "📝 Normal Sign-up Mode"
     panel_embed = discord.Embed(
-        title=f"✏️ อัพเดทข้อมูลนัดหมาย: {info['topic']}",
+        title=f"✏️ Update Meetup: {info['topic']}",
         description=(
-            f"สถานะปัจจุบัน: **{mode_str}**\n"
+            f"Current status: **{mode_str}**\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "• กด **📍 ถึงเวลามาที่นัดหมายแล้ว** เพื่อเปิดปุ่มเช็คอิน และซ่อนปุ่ม ไปด้วย / ไม่ไปแล้ว / ไม่แน่ใจ\n"
-            "• กด **📝 แก้ไขสถานที่ / เวลา / จำนวนคน** เพื่อแก้ไขรายละเอียดนัดหมาย"
+            "• Click **📍 Time now (Open Check-in)** to open check-in.\n"
+            "• Click **📝 Edit Details** to edit location, time, or limits."
         ),
         color=0x5865F2
     )
@@ -624,33 +624,32 @@ async def _open_update_options(interaction: discord.Interaction):
 
 
 class MeetupView(discord.ui.View):
-    """ปุ่มสำหรับการ์ดนัดหมายในช่วงเปิดรับลงชื่อปกติ (ก่อนถึงเวลานัด)
-    จัดกลุ่มปุ่มเป็น Row ชัดเจน:
-    - Row 0: ปุ่มตัดสินใจหลัก (ไปด้วย! / ไม่ไปแล้ว)
-    - Row 1: ปุ่มสถานะสำรอง (ไม่แน่ใจ / ขอดูก่อน)
-    - Row 2: ปุ่มเครื่องมือจัดการ (เพิ่มหมายเหตุ / แจ้งเตือนอีกครั้ง / อัพเดทข้อมูล)
+    """Buttons for meetup card during normal sign-up mode:
+    - Row 0: Main action (Join / Leave)
+    - Row 1: Backup status (Tentative)
+    - Row 2: Management tools (Add Note / Remind / Update)
     """
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="ไปด้วย!", style=discord.ButtonStyle.green, custom_id="join_meetup", row=0, emoji=EMOJI["join"])
+    @discord.ui.button(label="Join", style=discord.ButtonStyle.green, custom_id="join_meetup", row=0, emoji=EMOJI["join"])
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
         user_mention = interaction.user.mention
 
         if user_mention in info["going"]:
-            await interaction.response.send_message("❌ คุณลงชื่อว่า **ไปด้วย** อยู่แล้วนะ!", ephemeral=True)
+            await interaction.response.send_message("❌ You already joined!", ephemeral=True)
             return
         if user_mention in info["waitlist"]:
             pos = info["waitlist"].index(user_mention) + 1
             await interaction.response.send_message(
-                f"⏳ คุณอยู่ใน **คิวสำรองลำดับที่ {pos}** อยู่แล้วครับ (หากมีคนสละสิทธิ์ ระบบจะเลื่อนขึ้นให้อัตโนมัติ)",
+                f"⏳ You are already in **Waitlist #{pos}** (auto-promotes if someone leaves).",
                 ephemeral=True
             )
             return
 
-        # ลบออกจากรายชื่อไม่แน่ใจ (ถ้ามี)
+        # Remove from tentative if present
         if user_mention in info["tentative"]:
             info["tentative"].remove(user_mention)
 
@@ -675,12 +674,12 @@ class MeetupView(discord.ui.View):
         if joined_waitlist:
             pos = len(info["waitlist"])
             await interaction.followup.send(
-                f"⚠️ จำนวนคนเต็มแล้ว (`{max_limit}/{max_limit} คน`)!\n"
-                f"บอทได้เพิ่มคุณเข้าสู่ **⏳ คิวสำรองลำดับที่ {pos}** เรียบร้อยครับ หากมีคนกดยกเลิก ระบบจะเลื่อนชื่อคุณขึ้นและแท็กแจ้งเตือนอัตโนมัติ!",
+                f"⚠️ Full (`{max_limit}/{max_limit}`)!\n"
+                f"Added to **⏳ Waitlist #{pos}**. Auto-promotes and pings if someone drops!",
                 ephemeral=True
             )
 
-    @discord.ui.button(label="ไม่ไปแล้ว", style=discord.ButtonStyle.red, custom_id="leave_meetup", row=0, emoji=EMOJI["leave"])
+    @discord.ui.button(label="Leave", style=discord.ButtonStyle.red, custom_id="leave_meetup", row=0, emoji=EMOJI["leave"])
     async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -693,7 +692,7 @@ class MeetupView(discord.ui.View):
             and user_mention not in info["tentative"]
             and user_mention not in checked_in_mentions
         ):
-            await interaction.response.send_message("❌ คุณยังไม่ได้ลงชื่อในนัดหมายนี้เลยนะ!", ephemeral=True)
+            await interaction.response.send_message("❌ You have not joined this meetup.", ephemeral=True)
             return
 
         if user_mention in info["going"]:
@@ -724,18 +723,18 @@ class MeetupView(discord.ui.View):
         if promoted_users and interaction.channel:
             mentions_str = " ".join(promoted_users)
             await interaction.channel.send(
-                f"🎉 {mentions_str} มีที่ว่างแล้ว! คุณได้รับการเลื่อนจาก **คิวสำรอง** เข้าสู่รายชื่อผู้เข้าร่วมนัดหมาย **{info['topic']}** อัตโนมัติครับ",
+                f"🎉 {mentions_str} Slot opened! Promoted from **Waitlist** to **{info['topic']}**.",
                 allowed_mentions=discord.AllowedMentions(users=True)
             )
 
-    @discord.ui.button(label="ไม่แน่ใจ / ขอดูก่อน", style=discord.ButtonStyle.primary, custom_id="tentative_meetup", row=1, emoji=EMOJI["tentative"])
+    @discord.ui.button(label="Tentative", style=discord.ButtonStyle.primary, custom_id="tentative_meetup", row=1, emoji=EMOJI["tentative"])
     async def tentative_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
         user_mention = interaction.user.mention
 
         if user_mention in info["tentative"]:
-            await interaction.response.send_message("🤔 คุณอยู่ในรายชื่อ **ไม่แน่ใจ / ขอดูก่อน** อยู่แล้วนะ!", ephemeral=True)
+            await interaction.response.send_message("🤔 You are already on the **Tentative** list.", ephemeral=True)
             return
 
         promoted_users = []
@@ -766,34 +765,33 @@ class MeetupView(discord.ui.View):
         if promoted_users and interaction.channel:
             mentions_str = " ".join(promoted_users)
             await interaction.channel.send(
-                f"🎉 {mentions_str} มีที่ว่างแล้ว! คุณได้รับการเลื่อนจาก **คิวสำรอง** เข้าสู่รายชื่อผู้เข้าร่วมนัดหมาย **{info['topic']}** อัตโนมัติครับ",
+                f"🎉 {mentions_str} Slot opened! Promoted from **Waitlist** to **{info['topic']}**.",
                 allowed_mentions=discord.AllowedMentions(users=True)
             )
 
-    @discord.ui.button(label="เพิ่มหมายเหตุ", style=discord.ButtonStyle.secondary, custom_id="note_meetup", row=2, emoji=EMOJI["note"])
+    @discord.ui.button(label="Add Note", style=discord.ButtonStyle.secondary, custom_id="note_meetup", row=2, emoji=EMOJI["note"])
     async def note_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(NoteModal())
 
-    @discord.ui.button(label="แจ้งเตือนอีกครั้ง", style=discord.ButtonStyle.secondary, custom_id="notify_meetup", row=2, emoji=EMOJI["notify"])
+    @discord.ui.button(label="Remind", style=discord.ButtonStyle.secondary, custom_id="notify_meetup", row=2, emoji=EMOJI["notify"])
     async def notify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await _open_notify_panel(interaction)
 
-    @discord.ui.button(label="อัพเดทข้อมูล", style=discord.ButtonStyle.secondary, custom_id="edit_meetup", row=2, emoji=EMOJI["edit"])
+    @discord.ui.button(label="Update", style=discord.ButtonStyle.secondary, custom_id="edit_meetup", row=2, emoji=EMOJI["edit"])
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await _open_update_options(interaction)
 
 
 class CheckinMeetupView(discord.ui.View):
     """
-    ปุ่มสำหรับการ์ดนัดหมายเมื่อเปิดโหมด 'ถึงเวลามาที่นัดหมายแล้ว'
-    จัดกลุ่มปุ่มเป็น Row ชัดเจน:
-    - Row 0: ปุ่มเช็คอินหน้างาน (📍 ถึงที่นัดแล้ว!)
-    - Row 1: ปุ่มเครื่องมือจัดการ (🔔 แจ้งเตือนอีกครั้ง / ✏️ อัพเดทข้อมูล)
+    Buttons for meetup card in check-in mode:
+    - Row 0: Check-in button (📍 I'm Here!)
+    - Row 1: Tools (🔔 Remind / ✏️ Update)
     """
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="ถึงที่นัดแล้ว!", style=discord.ButtonStyle.green, custom_id="checkin_meetup_btn", row=0, emoji=EMOJI["checkin"])
+    @discord.ui.button(label="I'm Here!", style=discord.ButtonStyle.green, custom_id="checkin_meetup_btn", row=0, emoji=EMOJI["checkin"])
     async def checkin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -801,24 +799,24 @@ class CheckinMeetupView(discord.ui.View):
         user_mention = interaction.user.mention
         checked_in_mentions = [c["mention"] for c in info.get("checkins", [])]
 
-        # กรณีเช็คอินไปแล้ว
+        # If already checked in
         if user_mention in checked_in_mentions:
             not_arrived = [m for m in info["going"] if m not in checked_in_mentions]
             if not_arrived:
                 await interaction.response.send_message(
-                    f"📍 คุณเช็คอินไปแล้วครับ! ตอนนี้มาถึงแล้ว **{len(checked_in_mentions)}/{len(info['going'])} คน**\n"
-                    f"🏃‍♂️ ยังมาไม่ถึงอีก **{len(not_arrived)} คน** — กดปุ่มด้านล่างเพื่อแท็กตามเพื่อนได้เลย!",
+                    f"📍 Already checked in. Arrived: **{len(checked_in_mentions)}/{len(info['going'])}**\n"
+                    f"🏃‍♂️ Missing: **{len(not_arrived)}** — click below to ping friends!",
                     view=PingNotArrivedView(interaction.message),
                     ephemeral=True
                 )
             else:
                 await interaction.response.send_message(
-                    "📍 คุณเช็คอินไปแล้ว และตอนนี้ทุกคนมาถึงครบแล้วครับ! 🎉",
+                    "📍 You already checked in. Everyone is here! 🎉",
                     ephemeral=True
                 )
             return
 
-        # หากยังไม่ได้อยู่ในรายชื่อ going ให้เพิ่มเข้า going อัตโนมัติเมื่อมาถึงหน้างานจริง
+        # Auto-add to going upon arrival if not on list
         if user_mention in info["tentative"]:
             info["tentative"].remove(user_mention)
         if user_mention in info["waitlist"]:
@@ -846,46 +844,46 @@ class CheckinMeetupView(discord.ui.View):
 
         if not_arrived:
             await interaction.followup.send(
-                f"📍 **เช็คอินถึงที่นัดหมายสำเร็จ!**\n"
-                f"👥 มาถึงแล้ว **{len(checked_in_mentions)}/{len(info['going'])} คน** • ยังมาไม่ถึงอีก **{len(not_arrived)} คน**\n"
-                f"💡 กดปุ่มด้านล่างเพื่อแท็กตามเฉพาะเพื่อนที่ยังมาไม่ถึงได้เลยครับ!",
+                f"📍 **Checked in!**\n"
+                f"👥 Arrived: **{len(checked_in_mentions)}/{len(info['going'])}** • Missing: **{len(not_arrived)}**\n"
+                f"💡 Click button below to ping missing friends!",
                 view=PingNotArrivedView(interaction.message),
                 ephemeral=True
             )
         else:
             await interaction.followup.send(
-                "📍 **เช็คอินสำเร็จ!**\n"
-                "🎉 **ตอนนี้ทุกคนมาถึงที่นัดหมายครบแล้วครับ!**",
+                "📍 **Checked in!**\n"
+                "🎉 **Everyone arrived!**",
                 ephemeral=True
             )
             if len(info["going"]) > 1 and interaction.channel:
                 await interaction.channel.send(
-                    f"🎉 **มากันครบแก๊งแล้ว!** ผู้เข้าร่วมนัดหมาย **{info['topic']}** เช็คอินถึง `{info['location']}` ครบทั้ง **{len(info['going'])} คน** แล้วครับ ลุยยย!"
+                    f"🎉 **Full squad arrived!** All **{len(info['going'])}** participants for **{info['topic']}** checked in at `{info['location']}`."
                 )
 
-    @discord.ui.button(label="แจ้งเตือนอีกครั้ง", style=discord.ButtonStyle.secondary, custom_id="checkin_notify_btn", row=1, emoji=EMOJI["notify"])
+    @discord.ui.button(label="Remind", style=discord.ButtonStyle.secondary, custom_id="checkin_notify_btn", row=1, emoji=EMOJI["notify"])
     async def notify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await _open_notify_panel(interaction)
 
-    @discord.ui.button(label="อัพเดทข้อมูล", style=discord.ButtonStyle.secondary, custom_id="checkin_edit_btn", row=1, emoji=EMOJI["edit"])
+    @discord.ui.button(label="Update", style=discord.ButtonStyle.secondary, custom_id="checkin_edit_btn", row=1, emoji=EMOJI["edit"])
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await _open_update_options(interaction)
 
 
 class UpdateMeetupOptionsView(discord.ui.View):
-    """เมนูย่อยเมื่อกดปุ่ม '✏️ อัพเดทข้อมูล'"""
+    """Submenu when clicking '✏️ Update'"""
     def __init__(self, meetup_message: discord.Message, is_checkin_mode: bool = False):
         super().__init__(timeout=180)
         self.meetup_message = meetup_message
         self.is_checkin_mode = is_checkin_mode
         if is_checkin_mode:
-            self.toggle_mode_btn.label = "🔄 กลับไปโหมดลงชื่อปกติ (ไปด้วย/ไม่ไปแล้ว)"
+            self.toggle_mode_btn.label = "🔄 Switch to Normal Sign-ups"
             self.toggle_mode_btn.style = discord.ButtonStyle.primary
         else:
-            self.toggle_mode_btn.label = "📍 ถึงเวลามาที่นัดหมายแล้ว (เปิดเช็คอิน)"
+            self.toggle_mode_btn.label = "📍 Time now (Open Check-in)"
             self.toggle_mode_btn.style = discord.ButtonStyle.success
 
-    @discord.ui.button(label="📍 ถึงเวลามาที่นัดหมายแล้ว (เปิดเช็คอิน)", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="📍 Time now (Open Check-in)", style=discord.ButtonStyle.success, row=0)
     async def toggle_mode_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -902,8 +900,8 @@ class UpdateMeetupOptionsView(discord.ui.View):
             )
             await interaction.response.edit_message(
                 content=(
-                    "✅ **เปลี่ยนเป็นโหมดถึงเวลานัดหมายแล้ว!**\n"
-                    "ตอนนี้ในการ์ดเพิ่มปุ่ม **📍 ถึงที่นัดแล้ว!** และลบปุ่ม ไปด้วย / ไม่ไปแล้ว / ไม่แน่ใจ ออกเรียบร้อยครับ"
+                    "✅ **Switched to Check-in mode.**\n"
+                    "Added **📍 I'm Here!** button. Normal sign-up buttons removed."
                 ),
                 embed=None,
                 view=None
@@ -919,12 +917,12 @@ class UpdateMeetupOptionsView(discord.ui.View):
                 channel_id=self.meetup_message.channel.id
             )
             await interaction.response.edit_message(
-                content="✅ **เปลี่ยนกลับเป็นโหมดเปิดรับลงชื่อปกติเรียบร้อยครับ!**",
+                content="✅ **Switched back to Normal Sign-up mode.**",
                 embed=None,
                 view=None
             )
 
-    @discord.ui.button(label="📝 แก้ไขสถานที่ / เวลา / จำนวนคน", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📝 Edit Location / Time / Limit", style=discord.ButtonStyle.secondary, row=1)
     async def open_edit_modal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -941,12 +939,12 @@ class UpdateMeetupOptionsView(discord.ui.View):
 
 
 class PingNotArrivedView(discord.ui.View):
-    """ปุ่มด่วนสำหรับแท็กตามเฉพาะเพื่อนที่ลงชื่อว่าไป แต่ยังไม่ได้กดเช็คอิน"""
+    """Quick button to ping friends who marked Going but have not checked in."""
     def __init__(self, meetup_message: discord.Message):
         super().__init__(timeout=180)
         self.meetup_message = meetup_message
 
-    @discord.ui.button(label="🏃‍♂️ แท็กตามเพื่อนที่ยังไม่ถึง!", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🏃‍♂️ Ping Missing Friends!", style=discord.ButtonStyle.primary)
     async def ping_not_arrived(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -955,7 +953,7 @@ class PingNotArrivedView(discord.ui.View):
 
         if not not_arrived:
             await interaction.response.edit_message(
-                content="🎉 **ทุกคนเช็คอินถึงที่นัดหมายครบหมดแล้วครับ!**",
+                content="🎉 **Everyone has already checked in!**",
                 view=None
             )
             return
@@ -963,29 +961,29 @@ class PingNotArrivedView(discord.ui.View):
         mentions_str = " ".join(not_arrived)
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🏃‍♂️ ตามเพื่อนเข้าตี้: {info['topic']}",
+            title=f"🏃‍♂️ Ping Missing Friends: {info['topic']}",
             description=(
-                f"📍 **สถานที่:** `{info['location']}`\n"
-                f"⏰ **เวลานัด:** `{info['time_val']}`\n"
-                f"✅ **มาถึงแล้ว ({len(checked_in_mentions)}/{len(info['going'])} คน):** {' '.join(checked_in_mentions) if checked_in_mentions else '-'}\n"
-                f"💡 *ใครมาถึงแล้วอย่าลืมกดปุ่ม **📍 ถึงที่นัดแล้ว!** ในการ์ดนัดหมายนะครับ*\n"
-                f"🔗 [คลิกเพื่อเปิดการ์ดนัดหมาย]({jump_url})"
+                f"📍 **Location:** `{info['location']}`\n"
+                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"✅ **Arrived ({len(checked_in_mentions)}/{len(info['going'])}):** {' '.join(checked_in_mentions) if checked_in_mentions else '-'}\n"
+                f"💡 *Remember to click **📍 I'm Here!** on meetup card.*\n"
+                f"🔗 [Open Meetup Card]({jump_url})"
             ),
             color=0xE67E22
         )
         await interaction.channel.send(
-            content=f"📣 {interaction.user.mention} รออยู่ที่ **`{info['location']}`** แล้ว! ตามมาเร็วๆ ครับ: {mentions_str}",
+            content=f"📣 {interaction.user.mention} is waiting at **`{info['location']}`**! Hurry up: {mentions_str}",
             embed=alert_embed,
             allowed_mentions=discord.AllowedMentions(users=True)
         )
         await interaction.response.edit_message(
-            content="✅ **แท็กตามเพื่อนที่ยังมาไม่ถึงเรียบร้อยแล้วครับ!**",
+            content="✅ **Pinged missing friends.**",
             view=None
         )
 
 
 async def _send_dm_to_mentions(client: discord.Client, mentions: list[str], embed: discord.Embed, content: str = None) -> tuple[int, int]:
-    """ส่งข้อความแจ้งเตือนทาง DM ไปยังรายการ Mention (<@user_id>) คืนค่า (จำนวนที่ส่งสำเร็จ, จำนวนทั้งหมด)"""
+    """Send DM alert to mention list (<@user_id>). Returns (success_count, total_count)."""
     sent_count = 0
     total = 0
     seen_ids = set()
@@ -1009,42 +1007,42 @@ async def _send_dm_to_mentions(client: discord.Client, mentions: list[str], embe
 
 
 class SmartNotifyView(discord.ui.View):
-    """เมนูเลือกแท็กเฉพาะคนที่ลงชื่อไป ส่ง DM หรือตั้งเวลาเตือนล่วงหน้าอัตโนมัติ"""
+    """Menu to ping Going, ping Tentative, send DMs, or set auto-reminders."""
     def __init__(self, meetup_message: discord.Message):
         super().__init__(timeout=180)
         self.meetup_message = meetup_message
 
-    @discord.ui.button(label="🎯 แท็กเฉพาะคนที่ไป (Going)", style=discord.ButtonStyle.green, row=0)
+    @discord.ui.button(label="🎯 Ping Going", style=discord.ButtonStyle.green, row=0)
     async def ping_going(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
         if not info["going"]:
-            await interaction.response.send_message("❌ ยังไม่มีใครกด **✅ ไปด้วย!** ในนัดหมายนี้เลยครับ", ephemeral=True)
+            await interaction.response.send_message("❌ No one signed up as Going yet.", ephemeral=True)
             return
 
         mentions_str = " ".join(info["going"])
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🔔 แจ้งเตือนผู้เข้าร่วมนัดหมาย: {info['topic']}",
+            title=f"🔔 Meetup Alert: {info['topic']}",
             description=(
-                f"📍 **สถานที่:** `{info['location']}`\n"
-                f"⏰ **เวลานัด:** `{info['time_val']}`\n"
-                f"🔗 [คลิกเพื่อดูการ์ดนัดหมาย]({jump_url})"
+                f"📍 **Location:** `{info['location']}`\n"
+                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"🔗 [Open Meetup Card]({jump_url})"
             ),
             color=0x2ECC71
         )
         await interaction.channel.send(
-            content=f"📣 **แจ้งเตือนนัดหมายสำหรับผู้ที่ลงชื่อไว้!** {mentions_str}",
+            content=f"📣 **Meetup Alert for Going participants!** {mentions_str}",
             embed=alert_embed,
             allowed_mentions=discord.AllowedMentions(users=True)
         )
         await interaction.response.edit_message(
-            content="✅ **ส่งแจ้งเตือนเฉพาะคนที่กด 'ไปด้วย' เรียบร้อยแล้วครับ!**",
+            content="✅ **Alert sent to Going participants.**",
             embed=None,
             view=None
         )
 
-    @discord.ui.button(label="🤔 แท็กคนที่ไป + คนที่ไม่แน่ใจ", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🤔 Ping Going + Tentative", style=discord.ButtonStyle.primary, row=0)
     async def ping_going_and_tentative(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -1054,33 +1052,33 @@ class SmartNotifyView(discord.ui.View):
                 targets.append(m)
 
         if not targets:
-            await interaction.response.send_message("❌ ยังไม่มีใครลงชื่อหรือกดไม่แน่ใจในนัดหมายนี้เลยครับ", ephemeral=True)
+            await interaction.response.send_message("❌ No participants found in this meetup.", ephemeral=True)
             return
 
         mentions_str = " ".join(targets)
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🔔 แจ้งเตือนและเช็คชื่อนัดหมาย: {info['topic']}",
+            title=f"🔔 Meetup Check: {info['topic']}",
             description=(
-                f"📍 **สถานที่:** `{info['location']}`\n"
-                f"⏰ **เวลานัด:** `{info['time_val']}`\n"
-                f"💬 สำหรับคนที่กด **🤔 ไม่แน่ใจ** ไว้ อย่าลืมแวะมายืนยันในการ์ดนัดหมายนะครับ!\n"
-                f"🔗 [คลิกเพื่อไปที่การ์ดนัดหมาย]({jump_url})"
+                f"📍 **Location:** `{info['location']}`\n"
+                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"💬 If marked **🤔 Tentative**, please confirm on card!\n"
+                f"🔗 [Open Meetup Card]({jump_url})"
             ),
             color=0x5865F2
         )
         await interaction.channel.send(
-            content=f"📣 **แจ้งเตือนนัดหมาย!** {mentions_str}",
+            content=f"📣 **Meetup Alert!** {mentions_str}",
             embed=alert_embed,
             allowed_mentions=discord.AllowedMentions(users=True)
         )
         await interaction.response.edit_message(
-            content="✅ **ส่งแจ้งเตือนคนที่ไปและคนที่ไม่แน่ใจเรียบร้อยแล้วครับ!**",
+            content="✅ **Alert sent to Going and Tentative participants.**",
             embed=None,
             view=None
         )
 
-    @discord.ui.button(label="🏃‍♂️ แท็กตามคนที่ยังไม่เช็คอิน", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="🏃‍♂️ Ping Missing Check-ins", style=discord.ButtonStyle.secondary, row=0)
     async def ping_not_checked_in(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -1088,36 +1086,36 @@ class SmartNotifyView(discord.ui.View):
         not_arrived = [m for m in info["going"] if m not in checked_in_mentions]
 
         if not info["going"]:
-            await interaction.response.send_message("❌ ยังไม่มีใครลงชื่อว่าไปในนัดหมายนี้เลยครับ", ephemeral=True)
+            await interaction.response.send_message("❌ No one signed up as Going.", ephemeral=True)
             return
         if not not_arrived:
-            await interaction.response.send_message("🎉 ผู้เข้าร่วมทุกคนเช็คอินถึงที่นัดหมายครบหมดแล้วครับ!", ephemeral=True)
+            await interaction.response.send_message("🎉 All participants checked in!", ephemeral=True)
             return
 
         mentions_str = " ".join(not_arrived)
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🏃‍♂️ ตามเพื่อนที่ยังมาไม่ถึง: {info['topic']}",
+            title=f"🏃‍♂️ Missing Check-ins: {info['topic']}",
             description=(
-                f"📍 **สถานที่:** `{info['location']}`\n"
-                f"⏰ **เวลานัด:** `{info['time_val']}`\n"
-                f"✅ **เช็คอินถึงแล้ว:** `{len(checked_in_mentions)}/{len(info['going'])} คน`\n"
-                f"🔗 [คลิกเพื่อกดเช็คอินในการ์ดนัดหมาย]({jump_url})"
+                f"📍 **Location:** `{info['location']}`\n"
+                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"✅ **Checked In:** `{len(checked_in_mentions)}/{len(info['going'])}`\n"
+                f"🔗 [Open Meetup Card to Check In]({jump_url})"
             ),
             color=0xE67E22
         )
         await interaction.channel.send(
-            content=f"📣 **ตามหาคนยังไม่ถึงที่นัดหมาย!** รีบตามมาเร็วๆ ครับ: {mentions_str}",
+            content=f"📣 **Missing Check-ins!** Hurry up: {mentions_str}",
             embed=alert_embed,
             allowed_mentions=discord.AllowedMentions(users=True)
         )
         await interaction.response.edit_message(
-            content="✅ **แท็กตามคนที่ยังไม่กดเช็คอินเรียบร้อยแล้วครับ!**",
+            content="✅ **Pinged missing check-ins.**",
             embed=None,
             view=None
         )
 
-    @discord.ui.button(label="💌 ส่งแจ้งเตือนทางแชทส่วนตัว (DM)", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="💌 Send Direct Message (DM)", style=discord.ButtonStyle.success, row=1)
     async def send_dm_alert(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -1125,59 +1123,59 @@ class SmartNotifyView(discord.ui.View):
         targets = [m for m in info["going"] if m not in checked_in_mentions] if info.get("checkin_mode") else info["going"]
 
         if not targets:
-            msg_txt = "🎉 ทุกคนเช็คอินถึงที่นัดหมายครบหมดแล้วครับ!" if info.get("checkin_mode") else "❌ ยังไม่มีใครลงชื่อว่า **ไปด้วย** ในนัดหมายนี้เลยครับ"
+            msg_txt = "🎉 Everyone already checked in!" if info.get("checkin_mode") else "❌ No one signed up as Going yet."
             await interaction.response.send_message(msg_txt, ephemeral=True)
             return
 
         await interaction.response.edit_message(
-            content=f"⏳ **กำลังส่งข้อความแจ้งเตือนทาง DM ให้เพื่อน `{len(targets)} คน`...**",
+            content=f"⏳ **Sending DM alert to `{len(targets)}` friends...**",
             embed=None,
             view=None
         )
 
         jump_url = self.meetup_message.jump_url
-        guild_name = interaction.guild.name if interaction.guild else "เซิร์ฟเวอร์ Discord"
+        guild_name = interaction.guild.name if interaction.guild else "Discord Server"
         dm_embed = discord.Embed(
-            title=f"🔔 แจ้งเตือนนัดหมาย: {info['topic']}",
+            title=f"🔔 Meetup Alert: {info['topic']}",
             description=(
-                f"🏠 **เซิร์ฟเวอร์:** `{guild_name}`\n"
-                f"📍 **สถานที่:** `{info['location']}`\n"
-                f"⏰ **เวลานัด:** `{info['time_val']}`\n"
-                f"👤 **ส่งแจ้งเตือนโดย:** {interaction.user.mention}\n\n"
-                f"🔗 [คลิกที่นี่เพื่อเปิดการ์ดนัดหมาย]({jump_url})"
+                f"🏠 **Server:** `{guild_name}`\n"
+                f"📍 **Location:** `{info['location']}`\n"
+                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"👤 **Sent by:** {interaction.user.mention}\n\n"
+                f"🔗 [Open Meetup Card]({jump_url})"
             ),
             color=_theme_color(info)
         )
-        dm_embed.set_footer(text="💬 ข้อความแจ้งเตือนอัตโนมัติทางแชทส่วนตัว (DM)")
+        dm_embed.set_footer(text="💬 Automated DM notification")
 
         sent_ok, total_cnt = await _send_dm_to_mentions(
             interaction.client,
             targets,
             dm_embed,
-            content=f"💌 **แจ้งเตือนนัดหมาย `{info['topic']}` ครับ!**"
+            content=f"💌 **Meetup alert: `{info['topic']}`**"
         )
         await interaction.edit_original_response(
-            content=f"✅ **ส่งแจ้งเตือนทาง DM สำเร็จ `{sent_ok}/{total_cnt} คน` เรียบร้อยแล้วครับ!**"
+            content=f"✅ **Sent DM to `{sent_ok}/{total_cnt}` friends.**"
         )
 
-    @discord.ui.button(label="⏰ ตั้งเวลาเตือนล่วงหน้าอัตโนมัติ", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="⏰ Set Auto Reminder", style=discord.ButtonStyle.secondary, row=1)
     async def set_auto_reminder(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(SetReminderModal(self.meetup_message))
 
-    @discord.ui.button(label="📢 ดันโพสต์ + แท็ก @everyone", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="📢 Bump + Ping @everyone", style=discord.ButtonStyle.danger, row=2)
     async def ping_everyone_bump(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = self.meetup_message.embeds[0]
         info = parse_meetup_embed(embed)
         target_view = CheckinMeetupView() if info.get("checkin_mode") else MeetupView()
-        await interaction.response.edit_message(content="✅ **ดันโพสต์แจ้งเตือน @everyone เรียบร้อยครับ**", embed=None, view=None)
+        await interaction.response.edit_message(content="✅ **Bumped with @everyone.**", embed=None, view=None)
         try:
             new_msg = await interaction.channel.send(
-                content="@everyone 🔔 **มีการแจ้งเตือนนัดหมาย!**",
+                content="@everyone 🔔 **Meetup Alert!**",
                 embed=embed,
                 view=target_view,
                 allowed_mentions=discord.AllowedMentions(everyone=True)
             )
-            # อัปเดต message_id ใหม่ในประวัติเพื่อให้ระบบเตือนอัตโนมัติอ้างอิงข้อความใหม่ได้ถูกต้อง
+            # Update message_id in history for accurate future reminders
             old_id = str(self.meetup_message.id)
             history = load_json(HISTORY_FILE, [])
             for entry in history:
@@ -1188,19 +1186,19 @@ class SmartNotifyView(discord.ui.View):
             await self.meetup_message.delete()
         except discord.errors.Forbidden:
             await interaction.followup.send(
-                "❌ **บอทไม่มีสิทธิ์ (Permission) ในการส่งหรือลบข้อความในห้องนี้ครับ**\n"
-                "โปรดให้สิทธิ์ `Send Messages` และ `Manage Messages` กับบอทด้วยครับ",
+                "❌ **Bot lacks permission to send or manage messages here.**\n"
+                "Please grant `Send Messages` and `Manage Messages` to the bot.",
                 ephemeral=True
             )
         except Exception as e:
             print(f"Error in ping_everyone_bump: {e}")
 
 
-class SetReminderModal(discord.ui.Modal, title='⏰ ตั้งเวลาแจ้งเตือนผู้เข้าร่วมอัตโนมัติ'):
+class SetReminderModal(discord.ui.Modal, title='⏰ Set Auto Reminder'):
     remind_input = discord.ui.TextInput(
-        label='เวลาแจ้งเตือน (นาทีจากตอนนี้ หรือ เวลา HH:MM)',
+        label='Reminder time (minutes from now, or HH:MM)',
         style=discord.TextStyle.short,
-        placeholder='เช่น 30 (อีก 30 นาที), หรือ 19:30, หรือ วันนี้ 18:00',
+        placeholder='e.g. 30 (in 30 mins), or 19:30, or today 18:00',
         default='30',
         required=True,
         max_length=50,
@@ -1215,11 +1213,11 @@ class SetReminderModal(discord.ui.Modal, title='⏰ ตั้งเวลาแ�
         now = now_thai()
         target_dt = None
 
-        m_mins = re.match(r'^(?:อีก\s*)?(\d+)\s*(?:นาที|min|mins|m)?$', raw, re.IGNORECASE)
+        m_mins = re.match(r'^(?:in\s*)?(\d+)\s*(?:mins?|minutes?|m)?$', raw, re.IGNORECASE)
         if m_mins:
             mins = int(m_mins.group(1))
             if mins <= 0 or mins > 10080:
-                await interaction.response.send_message("❌ กรุณาระบุจำนวนนาทีระหว่าง 1 ถึง 10080 นาที (7 วัน) ครับ", ephemeral=True)
+                await interaction.response.send_message("❌ Minutes must be between 1 and 10080 (7 days).", ephemeral=True)
                 return
             target_dt = now + timedelta(minutes=mins)
         else:
@@ -1227,8 +1225,8 @@ class SetReminderModal(discord.ui.Modal, title='⏰ ตั้งเวลาแ�
 
         if not target_dt or target_dt <= now:
             await interaction.response.send_message(
-                "❌ ไม่สามารถแปลงเวลาได้ หรือเวลาที่ระบุผ่านไปแล้วครับ\n"
-                "💡 **ตัวอย่างที่รองรับ:** `30` (อีก 30 นาที), `19:30`, `วันนี้ 18:00`, `พรุ่งนี้ 11:00`",
+                "❌ Cannot parse time or time in the past.\n"
+                "💡 **Supported:** `30` (in 30 mins), `19:30`, `today 18:00`, `tomorrow 11:00`",
                 ephemeral=True
             )
             return
@@ -1244,8 +1242,8 @@ class SetReminderModal(discord.ui.Modal, title='⏰ ตั้งเวลาแ�
         )
 
         await interaction.response.send_message(
-            f"✅ **ตั้งเวลาแจ้งเตือนอัตโนมัติสำเร็จ!**\n"
-            f"⏰ บอทจะแท็กแจ้งเตือนรายชื่อคนที่ลงชื่อไว้เมื่อถึงเวลา **`{target_dt.strftime('%d/%m/%Y %H:%M')} น.`** ครับ",
+            f"✅ **Auto reminder scheduled!**\n"
+            f"⏰ Bot will ping participants at **`{target_dt.strftime('%d/%m/%Y %H:%M')}`**.",
             ephemeral=True
         )
 
@@ -1254,45 +1252,45 @@ class DraftMeetupView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="แก้ไขข้อมูล", style=discord.ButtonStyle.secondary, custom_id="draft_edit_meetup", row=0, emoji=EMOJI["edit"])
+    @discord.ui.button(label="Edit Draft", style=discord.ButtonStyle.secondary, custom_id="draft_edit_meetup", row=0, emoji=EMOJI["edit"])
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
         max_str = str(info["max_limit"]) if info["max_limit"] else ""
         await interaction.response.send_modal(EditMeetupModal(info["location"], info["time_val"], max_str, is_draft=True))
 
-    @discord.ui.button(label="ยืนยันข้อมูลนัด", style=discord.ButtonStyle.success, custom_id="draft_confirm_meetup", row=0, emoji=EMOJI["confirm"])
+    @discord.ui.button(label="Confirm & Post", style=discord.ButtonStyle.success, custom_id="draft_confirm_meetup", row=0, emoji=EMOJI["confirm"])
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
 
-        # กำหนดสีธีมให้สอดคล้องกับสถานะการนัดหมาย
+        # Set theme color according to meetup status
         embed.color = _theme_color(info)
 
-        # คำนวณเวลาเตือนล่วงหน้าอัตโนมัติ (ก่อนเวลานัด 30 นาที)
+        # Calculate auto reminder (30 minutes before meetup)
         meetup_dt = parse_thai_meetup_datetime(info["time_val"])
         now = now_thai()
         auto_remind_note = ""
         if meetup_dt and (meetup_dt - timedelta(minutes=30)) > now:
             remind_dt = meetup_dt - timedelta(minutes=30)
-            auto_remind_note = f"  •  🔔 เตือนอัตโนมัติ {remind_dt.strftime('%H:%M')} น."
+            auto_remind_note = f"  •  🔔 Auto-remind {remind_dt.strftime('%H:%M')}"
 
-        # เปลี่ยนข้อความ Footer และ Author กลับเป็นแบบปกติ
-        footer_text = embed.footer.text.replace("กดยืนยันเพื่อส่งลงห้องแชท", "กดปุ่มด้านล่างเพื่อลงชื่อ!") if embed.footer else ""
+        # Restore footer and author to normal
+        footer_text = embed.footer.text.replace("Click confirm to post", "Click buttons below to join!") if embed.footer else ""
         embed.set_footer(text=footer_text + auto_remind_note)
 
-        author_name = embed.author.name.replace("ร่าง", "") if (embed.author and embed.author.name) else "🔔 การนัดหมาย"
+        author_name = embed.author.name.replace("Draft", "").strip() or "🔔 Meetup"
         icon_url = embed.author.icon_url if embed.author else None
         embed.set_author(name=author_name, icon_url=icon_url)
 
         try:
-            confirm_msg = "✅ **ส่งการนัดหมายลงช่องแชทแล้วครับ!**"
+            confirm_msg = "✅ **Meetup posted to channel!**"
             if auto_remind_note:
-                confirm_msg += f"\n⏰ *(ระบบตั้งเวลาแจ้งเตือนผู้เข้าร่วมอัตโนมัติก่อนเวลานัด 30 นาทีแล้ว)*"
+                confirm_msg += f"\n⏰ *(Auto-reminder scheduled 30 mins before meetup)*"
             await interaction.response.edit_message(content=confirm_msg, embed=None, view=None)
 
             sent_msg = await interaction.channel.send(
-                content="@everyone 📢 **มีการนัดหมายใหม่!**",
+                content="@everyone 📢 **New Meetup!**",
                 embed=embed,
                 view=MeetupView(),
                 allowed_mentions=discord.AllowedMentions(everyone=True)
@@ -1315,33 +1313,33 @@ class DraftMeetupView(discord.ui.View):
 
         except discord.errors.Forbidden:
             await interaction.followup.send(
-                "❌ **บอทไม่มีสิทธิ์ (Permission) ส่งข้อความในห้องนี้ครับ**\nโปรดให้สิทธิ์ `Send Messages` กับบอทด้วยครับ",
+                "❌ **Bot lacks permission to send messages here.**\nPlease grant `Send Messages` to the bot.",
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.followup.send(f"❌ **เกิดข้อผิดพลาดในการส่งข้อความ:** {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ **Failed to send message:** {e}", ephemeral=True)
             print(f"Error in confirm_button: {e}")
 
 
-class EditMeetupModal(discord.ui.Modal, title='✏️ แก้ไขข้อมูลนัดหมาย'):
+class EditMeetupModal(discord.ui.Modal, title='✏️ Edit Meetup Details'):
     location = discord.ui.TextInput(
-        label='สถานที่',
+        label='Location',
         style=discord.TextStyle.short,
-        placeholder='เช่น หอ A, ร้านประจำ, Major ลพบุรี',
+        placeholder='e.g. Dorm A, Regular Spot, Mall',
         required=True,
         max_length=100,
     )
     time_str = discord.ui.TextInput(
-        label='เวลา (ระบุ HH:MM เพื่อเตือนล่วงหน้า 30 นาที)',
+        label='Time (HH:MM for 30m auto-remind)',
         style=discord.TextStyle.short,
-        placeholder='เช่น วันนี้ 20:00, พรุ่งนี้ 14:30',
+        placeholder='e.g. Today 20:00, Tomorrow 14:30',
         required=True,
         max_length=50,
     )
     max_participants = discord.ui.TextInput(
-        label='จำนวนคนสูงสุด (เว้นว่าง = ไม่จำกัด)',
+        label='Max People (leave blank for unlimited)',
         style=discord.TextStyle.short,
-        placeholder='เช่น 4, 5, 10 (ถ้าเต็มจะเข้าคิวสำรองอัตโนมัติ)',
+        placeholder='e.g. 4, 5, 10 (full goes to waitlist)',
         required=False,
         max_length=5,
     )
@@ -1371,13 +1369,13 @@ class EditMeetupModal(discord.ui.Modal, title='✏️ แก้ไขข้อ�
         max_raw = self.max_participants.value.strip()
         if max_raw:
             if not max_raw.isdigit() or int(max_raw) <= 0:
-                await interaction.response.send_message("❌ จำนวนคนสูงสุดต้องเป็นตัวเลขจำนวนเต็มบวก เช่น `4` หรือ `5` ครับ", ephemeral=True)
+                await interaction.response.send_message("❌ Max people must be a positive integer like `4` or `5`.", ephemeral=True)
                 return
             info["max_limit"] = int(max_raw)
         else:
             info["max_limit"] = None
 
-        # จัดการเลื่อนคิวสำรองกรณีขยายจำนวนคน หรือย้ายไปคิวสำรองกรณีลดจำนวนคนสูงสุด
+        # Promote from waitlist if limit increased, or move to waitlist if decreased
         promoted_users = []
         max_limit = info["max_limit"]
         if max_limit is None:
@@ -1398,7 +1396,7 @@ class EditMeetupModal(discord.ui.Modal, title='✏️ แก้ไขข้อ�
         if self.meetup_message:
             await self.meetup_message.edit(embed=new_embed)
             await interaction.response.edit_message(
-                content="✅ **บันทึกการแก้ไขข้อมูลนัดหมายเรียบร้อยครับ!**",
+                content="✅ **Meetup details updated!**",
                 embed=None,
                 view=None
             )
@@ -1415,16 +1413,16 @@ class EditMeetupModal(discord.ui.Modal, title='✏️ แก้ไขข้อ�
             if promoted_users and interaction.channel:
                 mentions_str = " ".join(promoted_users)
                 await interaction.channel.send(
-                    f"🎉 {mentions_str} มีการขยายจำนวนที่นั่ง! คุณได้รับการเลื่อนจาก **คิวสำรอง** เข้าสู่รายชื่อผู้เข้าร่วมนัดหมาย **{info['topic']}** แล้วครับ",
+                    f"🎉 {mentions_str} Seat limit expanded! Promoted from **Waitlist** to **{info['topic']}**.",
                     allowed_mentions=discord.AllowedMentions(users=True)
                 )
 
 
-class NoteModal(discord.ui.Modal, title='📝 เพิ่มหมายเหตุ'):
+class NoteModal(discord.ui.Modal, title='📝 Add Note'):
     note_text = discord.ui.TextInput(
-        label='พิมพ์หมายเหตุของคุณ',
+        label='Your Note',
         style=discord.TextStyle.long,
-        placeholder='เช่น ขอไปสาย 10 นาทีนะ, เอารถไป 2 คัน...',
+        placeholder='e.g. 10 mins late, bringing 2 cars...',
         required=True,
         max_length=300,
     )
@@ -1435,12 +1433,12 @@ class NoteModal(discord.ui.Modal, title='📝 เพิ่มหมายเห�
         note_str = f"💬 **{interaction.user.display_name}:** {self.note_text.value}"
 
         current_notes = info["friend_notes"]
-        if current_notes == "*ยังไม่มีหมายเหตุ*" or not current_notes:
+        if current_notes == "*No notes yet*" or not current_notes:
             new_notes = note_str
         else:
             new_notes = current_notes + f"\n{note_str}"
 
-        # ป้องกันข้อความเกินขีดจำกัด 1024 ตัวอักษรของ Discord Embed Field
+        # Prevent exceeding 1024 char Discord embed field limit
         if len(new_notes) > 1024:
             lines = new_notes.split("\n")
             while len("\n".join(lines)) > 1024 and len(lines) > 1:
@@ -1451,21 +1449,21 @@ class NoteModal(discord.ui.Modal, title='📝 เพิ่มหมายเห�
         new_embed = rebuild_meetup_embed(embed, info)
         await interaction.response.edit_message(embed=new_embed)
 
-# ==================== Dropdown เลือกหนัง ====================
+# ==================== Movie Selection Dropdown ====================
 
 class MovieSelect(discord.ui.Select):
     def __init__(self, movies):
         self.movies_data = movies
         options = []
-        for i, movie in enumerate(movies[:25]):  # Discord จำกัดที่ 25 ตัวเลือก
+        for i, movie in enumerate(movies[:25]):  # Discord limit: 25 items
             showtimes_preview = ", ".join(movie['showtimes'][:3])
             options.append(discord.SelectOption(
                 label=movie['name'][:100],
-                description=f"รอบ: {showtimes_preview}"[:100],
+                description=f"Showtimes: {showtimes_preview}"[:100],
                 value=str(i),
                 emoji="🎬"
             ))
-        super().__init__(placeholder="🎬 เลือกหนังที่อยากดู...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="🎬 Select movie...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         movie_idx = int(self.values[0])
@@ -1474,14 +1472,14 @@ class MovieSelect(discord.ui.Select):
         view = ShowtimeSelectView(movie)
         embed = discord.Embed(
             title=f"🎬 {movie['name']}",
-            description="เลือกรอบฉายที่ต้องการ:",
+            description="Select desired showtime:",
             color=0xE50914
         )
         if movie['image']:
             embed.set_thumbnail(url=movie['image'])
 
         showtimes_fmt = " ".join([f"` {t} `" for t in movie['showtimes']])
-        embed.add_field(name="⏰ รอบฉายทั้งหมด", value=showtimes_fmt[:1024], inline=False)
+        embed.add_field(name="⏰ All Showtimes", value=showtimes_fmt[:1024], inline=False)
 
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -1490,19 +1488,19 @@ class MovieSelectView(discord.ui.View):
         super().__init__(timeout=120)
         self.add_item(MovieSelect(movies))
 
-class MovieDateModal(discord.ui.Modal, title='📅 เลือกวันที่และจำนวนคนดูหนัง'):
+class MovieDateModal(discord.ui.Modal, title='📅 Movie Date & Participant Limit'):
     date_str = discord.ui.TextInput(
-        label='วันที่ต้องการดู',
+        label='Date',
         style=discord.TextStyle.short,
-        placeholder='เช่น วันนี้, พรุ่งนี้, วันเสาร์ที่ 28',
-        default='วันนี้',
+        placeholder='e.g. Today, Tomorrow, Saturday',
+        default='Today',
         required=True,
         max_length=50,
     )
     max_participants = discord.ui.TextInput(
-        label='จำกัดจำนวนคนสูงสุด (เว้นว่าง = ไม่จำกัด)',
+        label='Max People (leave blank for unlimited)',
         style=discord.TextStyle.short,
-        placeholder='เช่น 4 (นั่งรถคันเดียวกัน), 6',
+        placeholder='e.g. 4 (one car), 6',
         required=False,
         max_length=5,
     )
@@ -1517,14 +1515,14 @@ class MovieDateModal(discord.ui.Modal, title='📅 เลือกวันท�
         max_limit = None
         if max_raw:
             if not max_raw.isdigit() or int(max_raw) <= 0:
-                await interaction.response.send_message("❌ จำนวนคนสูงสุดต้องเป็นตัวเลขจำนวนเต็มบวก เช่น `4` หรือ `6` ครับ", ephemeral=True)
+                await interaction.response.send_message("❌ Max people must be a positive integer like `4` or `6`.", ephemeral=True)
                 return
             max_limit = int(max_raw)
 
-        if self.selected_time == "ยังไม่ระบุเวลา":
-            final_time = f"{self.date_str.value} (ยังไม่ระบุเวลา)"
+        if self.selected_time == "Time TBD":
+            final_time = f"{self.date_str.value} (Time TBD)"
         else:
-            final_time = f"{self.date_str.value} เวลา {self.selected_time}"
+            final_time = f"{self.date_str.value} at {self.selected_time}"
 
         base_embed = discord.Embed(
             title=f"📅  🎬 {self.movie['name']}",
@@ -1533,24 +1531,24 @@ class MovieDateModal(discord.ui.Modal, title='📅 เลือกวันท�
         )
         if self.movie['image']:
             base_embed.set_thumbnail(url=self.movie['image'])
-        base_embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดยืนยันเพื่อส่งลงห้องแชท")
-        base_embed.set_author(name="🔔 ร่างนัดดูหนัง", icon_url=interaction.user.display_avatar.url)
+        base_embed.set_footer(text=f"🎯 Created by {interaction.user.display_name}  •  Click confirm to post")
+        base_embed.set_author(name="🔔 Movie Meetup Draft", icon_url=interaction.user.display_avatar.url)
 
         info = {
-            "location": "เมเจอร์ บิ๊กซี ลพบุรี",
+            "location": "Major Cineplex Big C Lopburi",
             "time_val": final_time,
             "pin_note": None,
             "going": [],
             "waitlist": [],
             "tentative": [],
             "max_limit": max_limit,
-            "friend_notes": "*ยังไม่มีหมายเหตุ*",
+            "friend_notes": "*No notes yet*",
         }
         embed = rebuild_meetup_embed(base_embed, info)
         view = DraftMeetupView()
 
         await interaction.response.edit_message(
-            content="นี่คือ **ร่างการนัดหมาย** (มีแค่คุณที่เห็น) \nเมื่อแก้ไขจนพอใจแล้ว ให้กดปุ่ม **📢 ยืนยันข้อมูลนัด** เพื่อส่งเข้าห้องแชทรวมครับ",
+            content="**Meetup Draft** (only you see this)\nWhen ready, click **📢 Confirm & Post** to publish to channel.",
             embed=embed,
             view=view
         )
@@ -1559,7 +1557,7 @@ class ShowtimeSelect(discord.ui.Select):
     def __init__(self, movie):
         self.movie = movie
         options = []
-        # จำกัดไม่เกิน 24 รอบฉาย เพื่อเผื่อที่ให้ตัวเลือก "ยังไม่แน่ใจ" ไม่เกินลิมิต 25 ตัวเลือกของ Discord
+        # Limit to 24 showtimes to reserve 1 slot for 'Not sure yet' within Discord 25 options limit
         for t in movie['showtimes'][:24]:
             options.append(discord.SelectOption(
                 label=f"🕐 {t}",
@@ -1568,21 +1566,21 @@ class ShowtimeSelect(discord.ui.Select):
             ))
 
         options.append(discord.SelectOption(
-            label="🤔 ยังไม่แน่ใจว่าจะดูเมื่อไหร่",
-            description="นัดหมายไว้ก่อน ค่อยตกลงเวลากันทีหลัง",
-            value="ยังไม่ระบุเวลา",
+            label="🤔 Not sure yet",
+            description="Schedule first, decide time later",
+            value="Time TBD",
             emoji="⏳"
         ))
 
-        super().__init__(placeholder="🕐 เลือกรอบฉาย...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="🕐 Select showtime...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         selected_time = self.values[0]
         await interaction.response.send_modal(MovieDateModal(self.movie, selected_time))
 
 def get_trailer_url(movie_name: str) -> str:
-    """สร้างลิงก์ค้นหาตัวอย่างหนังบน YouTube"""
-    query = quote(f"{movie_name} Official Trailer ตัวอย่างหนัง")
+    """Generate YouTube trailer search link."""
+    query = quote(f"{movie_name} Official Trailer")
     return f"https://www.youtube.com/results?search_query={query}"
 
 class ShowtimeSelectView(discord.ui.View):
@@ -1590,7 +1588,7 @@ class ShowtimeSelectView(discord.ui.View):
         super().__init__(timeout=120)
         self.add_item(ShowtimeSelect(movie))
         self.add_item(discord.ui.Button(
-            label="▶️ ดูตัวอย่างหนัง (YouTube Trailer)",
+            label="▶️ Movie Trailer (YouTube)",
             style=discord.ButtonStyle.link,
             url=get_trailer_url(movie['name'])
         ))
@@ -1631,15 +1629,15 @@ class MyBot(commands.Bot):
         async def _sync_commands():
             try:
                 synced = await self.tree.sync()
-                print(f"✅ ซิงค์คำสั่ง Slash Commands สำเร็จ ({len(synced)} คำสั่ง)", flush=True)
+                print(f"✅ Synced Slash Commands ({len(synced)} commands)", flush=True)
             except Exception as e:
                 print(f"⚠️ Warning syncing commands: {e}", flush=True)
 
         asyncio.create_task(_sync_commands())
 
     async def on_ready(self):
-        set_bot_status(True, "✅ เชื่อมต่อกับ Discord สำเร็จและพร้อมใช้งาน!", f"{self.user} (ID: {self.user.id})")
-        print(f'✅ บอทออนไลน์แล้ว! Logged in as {self.user} (ID: {self.user.id})', flush=True)
+        set_bot_status(True, "✅ Connected to Discord and ready!", f"{self.user} (ID: {self.user.id})")
+        print(f'✅ Bot online! Logged in as {self.user} (ID: {self.user.id})', flush=True)
         print('------', flush=True)
 
     async def _resolve_channel(self, channel_id: int):
@@ -1653,7 +1651,7 @@ class MyBot(commands.Bot):
                 ch = None
         return ch
 
-    # ---------- ลูป 1: เช็คหนังใหม่ทุก 1 ชั่วโมง ----------
+    # ---------- Loop 1: Check new movies hourly ----------
     @tasks.loop(hours=1)
     async def check_movies(self):
         try:
@@ -1673,7 +1671,7 @@ class MyBot(commands.Bot):
                     for movie in new_movies:
                         trailer_url = get_trailer_url(movie['name'])
                         embed = discord.Embed(
-                            title="🆕 หนังเข้าใหม่!",
+                            title="🆕 New Movie in Theaters!",
                             description=f"# 🎬 {movie['name']}",
                             color=0xE50914
                         )
@@ -1681,20 +1679,20 @@ class MyBot(commands.Bot):
                             embed.set_thumbnail(url=movie['image'])
 
                         showtimes_fmt = " ".join([f"` {t} `" for t in movie['showtimes']])
-                        embed.add_field(name="⏰ รอบฉาย", value=showtimes_fmt[:1024], inline=False)
-                        embed.add_field(name="📍 โรง", value="เมเจอร์ บิ๊กซี ลพบุรี", inline=True)
-                        embed.add_field(name="🎞️ ตัวอย่างหนัง", value=f"[▶️ คลิกดูบน YouTube]({trailer_url})", inline=True)
-                        embed.set_footer(text="พิมพ์ /นัด เพื่อนัดเพื่อนไปดูด้วยกัน!")
+                        embed.add_field(name="⏰ Showtimes", value=showtimes_fmt[:1024], inline=False)
+                        embed.add_field(name="📍 Cinema", value="Major Cineplex Big C Lopburi", inline=True)
+                        embed.add_field(name="🎞️ Trailer", value=f"[▶️ Watch on YouTube]({trailer_url})", inline=True)
+                        embed.set_footer(text="Type /meetup to invite friends!")
 
                         trailer_view = discord.ui.View()
                         trailer_view.add_item(discord.ui.Button(
-                            label=f"▶️ ดูตัวอย่าง: {movie['name'][:40]}",
+                            label=f"▶️ Trailer: {movie['name'][:40]}",
                             style=discord.ButtonStyle.link,
                             url=trailer_url
                         ))
 
                         await channel.send(
-                            content="🍿 **มีหนังใหม่เข้าโรงแล้ว!**",
+                            content="🍿 **New movie released!**",
                             embed=embed,
                             view=trailer_view
                         )
@@ -1705,7 +1703,7 @@ class MyBot(commands.Bot):
     async def before_check_movies(self):
         await self.wait_until_ready()
 
-    # ---------- ลูป 2: เช็คสภาพอากาศและเตือนฝนตกทุก 5 นาที ----------
+    # ---------- Loop 2: Check weather and alert rain every 5 minutes ----------
     @tasks.loop(minutes=5)
     async def check_weather(self):
         if not self.weather_channel_id or self.weather_lat is None or self.weather_lon is None:
@@ -1756,19 +1754,19 @@ class MyBot(commands.Bot):
                     weather_desc = translate_weather_code(rain_code or current.get("weather_code", 0))
 
                     embed = discord.Embed(
-                        title="🌧️ แจ้งเตือนระวังฝนตก!",
+                        title="🌧️ Rain Warning Alert!",
                         description=(
                             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"พยากรณ์พบแนวโน้มฝนตกในพื้นที่ของคุณ\n"
-                            f"สภาพอากาศ: **{weather_desc}**\n"
+                            f"Forecast detects rain in your area.\n"
+                            f"Weather: **{weather_desc}**\n"
                             f"━━━━━━━━━━━━━━━━━━━━━━"
                         ),
                         color=0x3498DB
                     )
-                    embed.add_field(name="⏰ เวลาที่คาดการณ์", value=f"```{rain_time} น.```", inline=True)
-                    embed.add_field(name="☔ โอกาสฝนตก", value=f"```{max_prob}%```", inline=True)
-                    embed.add_field(name="🌡️ อุณหภูมิ / ความชื้น", value=f"```{temp}°C / {humidity}%```", inline=True)
-                    embed.set_footer(text=f"📍 พิกัด: {self.weather_lat}, {self.weather_lon} • แจ้งเตือนซ้ำอีกครั้งในอีก 30 นาทีหากยังมีฝน")
+                    embed.add_field(name="⏰ Estimated Time", value=f"```{rain_time}```", inline=True)
+                    embed.add_field(name="☔ Rain Chance", value=f"```{max_prob}%```", inline=True)
+                    embed.add_field(name="🌡️ Temp / Humidity", value=f"```{temp}°C / {humidity}%```", inline=True)
+                    embed.set_footer(text=f"📍 Coordinates: {self.weather_lat}, {self.weather_lon} • Re-alerts in 30 minutes if rain continues")
 
                     map_buf = await generate_weather_map(self.weather_lat, self.weather_lon)
                     view = WeatherMapView(self.weather_lat, self.weather_lon)
@@ -1776,14 +1774,14 @@ class MyBot(commands.Bot):
                         file = discord.File(fp=map_buf, filename="weather_map.png")
                         embed.set_image(url="attachment://weather_map.png")
                         await channel.send(
-                            content="☔ **เตรียมเก็บผ้าพกร่ม!** มีโอกาสฝนตกสูงครับ",
+                            content="☔ **Grab your umbrella!** High chance of rain.",
                             embed=embed,
                             file=file,
                             view=view
                         )
                     else:
                         await channel.send(
-                            content="☔ **เตรียมเก็บผ้าพกร่ม!** มีโอกาสฝนตกสูงครับ",
+                            content="☔ **Grab your umbrella!** High chance of rain.",
                             embed=embed,
                             view=view
                         )
@@ -1795,7 +1793,7 @@ class MyBot(commands.Bot):
     async def before_check_weather(self):
         await self.wait_until_ready()
 
-    # ---------- ลูป 3: ระบบเตือนนัดหมายล่วงหน้าอัตโนมัติ (Auto-Reminder) ----------
+    # ---------- Loop 3: Auto Meetup Reminders ----------
     @tasks.loop(minutes=1)
     async def check_reminders(self):
         try:
@@ -1822,7 +1820,7 @@ class MyBot(commands.Bot):
                     entry["reminded"] = True
                     changed = True
 
-                    # ห่างจากเวลาเตือนเกิน 2 ชั่วโมง (เช่น บอทปิดไปนาน) ให้ข้ามเพื่อไม่ให้แจ้งเตือนย้อนหลังมั่ว
+                    # Skip if reminder time is over 2 hours ago (e.g. bot was offline)
                     if (now - remind_dt).total_seconds() > 7200:
                         continue
 
@@ -1837,12 +1835,12 @@ class MyBot(commands.Bot):
 
                     going_list = entry.get("going_mentions", [])
                     tentative_list = entry.get("tentative_mentions", [])
-                    topic = entry.get("topic", "การนัดหมาย")
+                    topic = entry.get("topic", "Meetup")
                     location = entry.get("location", "-")
                     time_val = entry.get("time", "-")
                     jump_url = None
 
-                    # พยายามดึงรายชื่อล่าสุดจากข้อความการ์ดนัดหมายจริง
+                    # Fetch latest participant list from message card
                     if msg_id_str:
                         try:
                             msg = await channel.fetch_message(int(msg_id_str))
@@ -1867,34 +1865,34 @@ class MyBot(commands.Bot):
 
                     mentions_str = " ".join(all_pings)
                     desc_lines = [
-                        f"📍 **สถานที่:** `{location}`",
-                        f"⏰ **เวลานัด:** `{time_val}`",
-                        f"👥 **ผู้เข้าร่วม ({len(going_list)} คน):** {' '.join(going_list) if going_list else '-'}",
+                        f"📍 **Location:** `{location}`",
+                        f"⏰ **Time:** `{time_val}`",
+                        f"👥 **Going ({len(going_list)}):** {' '.join(going_list) if going_list else '-'}",
                     ]
                     if tentative_list:
-                        desc_lines.append(f"🤔 **ยังไม่แน่ใจ ({len(tentative_list)} คน):** {' '.join(tentative_list)}")
+                        desc_lines.append(f"🤔 **Tentative ({len(tentative_list)}):** {' '.join(tentative_list)}")
                     if jump_url:
-                        desc_lines.append(f"\n🔗 [คลิกเพื่อเปิดการ์ดนัดหมาย]({jump_url})")
+                        desc_lines.append(f"\n🔗 [Open Meetup Card]({jump_url})")
 
                     rem_embed = discord.Embed(
-                        title=f"⏰ แจ้งเตือนอัตโนมัติ: ใกล้ถึงเวลานัด '{topic}' แล้ว!",
+                        title=f"⏰ Auto Reminder: '{topic}' starting soon!",
                         description="\n".join(desc_lines),
                         color=0xF1C40F
                     )
-                    rem_embed.set_footer(text="ระบบแจ้งเตือนผู้เข้าร่วมอัตโนมัติ")
+                    rem_embed.set_footer(text="Automated meetup reminder system")
 
                     await channel.send(
-                        content=f"🔔 **เตรียมตัวให้พร้อม!** แจ้งเตือนรายชื่อผู้ลงชื่อนัดหมาย: {mentions_str}",
+                        content=f"🔔 **Get ready!** Meetup reminder for participants: {mentions_str}",
                         embed=rem_embed,
                         allowed_mentions=discord.AllowedMentions(users=True)
                     )
 
-                    # ส่งการแจ้งเตือนแบบ DM ให้ผู้ลงชื่อทุกคนควบคู่กัน
+                    # Send DM alert in parallel
                     await _send_dm_to_mentions(
                         self,
                         all_pings,
                         rem_embed,
-                        content=f"💌 **แจ้งเตือนนัดหมายอัตโนมัติ: `{topic}` ใกล้ถึงเวลานัดแล้วครับ!**"
+                        content=f"💌 **Meetup Reminder: `{topic}` starting soon!**"
                     )
 
             if changed:
@@ -1906,7 +1904,7 @@ class MyBot(commands.Bot):
     async def before_check_reminders(self):
         await self.wait_until_ready()
 
-    # ---------- ลูป 4: สรุปข่าวสารประจำเช้าวันใหม่ (Morning Briefing 07:30 น.) ----------
+    # ---------- Loop 4: Daily Morning Briefing (07:30) ----------
     @tasks.loop(time=dt_time(hour=7, minute=30, tzinfo=THAI_TZ))
     async def morning_briefing(self):
         target_channel_id = self.weather_channel_id or self.movie_channel_id
@@ -1929,14 +1927,14 @@ class MyBot(commands.Bot):
             file = discord.File(fp=map_buf, filename="morning_weather_map.png")
             embed.set_image(url="attachment://morning_weather_map.png")
             await channel.send(
-                content="🌅 **อรุณสวัสดิ์ครับ! สรุปสภาพอากาศ ค่าฝุ่น และนัดหมายประจำวันนี้มาแล้วครับ**",
+                content="🌅 **Good morning! Here is today's weather, PM 2.5, and meetup briefing.**",
                 embed=embed,
                 file=file,
                 view=view
             )
         else:
             await channel.send(
-                content="🌅 **อรุณสวัสดิ์ครับ! สรุปสภาพอากาศ ค่าฝุ่น และนัดหมายประจำวันนี้มาแล้วครับ**",
+                content="🌅 **Good morning! Here is today's weather, PM 2.5, and meetup briefing.**",
                 embed=embed,
                 view=view
             )
@@ -1947,17 +1945,9 @@ class MyBot(commands.Bot):
 
 
 async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str = None):
-    """สร้างการ์ดสรุปข่าวสารประจำเช้าวันใหม่ (สภาพอากาศ + PM 2.5 + โอกาสฝนตก + นัดหมายวันนี้)"""
+    """Build morning briefing card (Weather + PM 2.5 + Rain Chance + Today's Meetups)."""
     now = now_thai()
-    thai_days = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
-    thai_months = [
-        "", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
-    ]
-    day_name = thai_days[now.weekday()]
-    month_name = thai_months[now.month]
-    buddhist_year = now.year + 543
-    date_header = f"วัน{day_name}ที่ {now.day} {month_name} {buddhist_year}"
+    date_header = now.strftime("%A, %d %B %Y")
 
     data, aq_data = await _fetch_weather_and_aq_data(lat, lon, forecast_days=1)
 
@@ -1973,7 +1963,7 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
     t_min = (daily.get("temperature_2m_min") or ["-"])[0]
     rain_prob_max = (daily.get("precipitation_probability_max") or [0])[0] or 0
 
-    # เช็คช่วงเวลาที่มีโอกาสฝนตกสูงในวันนี้ (07:00 - 23:00)
+    # Check peak rain chance hours (07:00 - 23:00)
     hourly = data.get("hourly", {})
     h_times = hourly.get("time", [])
     h_probs = hourly.get("precipitation_probability", [])
@@ -1984,18 +1974,18 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
             hh = t_str.split("T")[1] if "T" in t_str else t_str
             rainy_hours.append(f"{hh} ({p}%)")
 
-    # ข้อมูลฝุ่น PM 2.5
+    # PM 2.5 Air Quality
     aq_current = aq_data.get("current", {})
     pm25_val = aq_current.get("pm2_5")
     aqi_val = aq_current.get("us_aqi", "-")
     aq_status, aq_warning, is_dust_high = evaluate_air_quality(pm25_val, aqi_val)
-    pm25_str = f"{pm25_val} µg/m³" if pm25_val is not None else "ไม่มีข้อมูล"
+    pm25_str = f"{pm25_val} µg/m³" if pm25_val is not None else "No data"
 
-    # ดึงนัดหมายที่มีในวันนี้
+    # Today's meetups
     history = load_json(HISTORY_FILE, [])
     today_meetups = []
     today_date = now.date()
-    day_token_patterns = [f"ที่ {now.day}", f"ที่{now.day}", f"{now.day:02d}/{now.month:02d}"]
+    day_token_patterns = [f" {now.day} ", f"/{now.day}/", f"{now.day:02d}/{now.month:02d}"]
 
     for entry in history:
         if guild_id_str and entry.get("guild_id") and str(entry.get("guild_id")) != guild_id_str:
@@ -2018,7 +2008,7 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
             elif c_iso:
                 try:
                     c_dt = datetime.fromisoformat(c_iso)
-                    if c_dt.date() == today_date and "พรุ่งนี้" not in t_val and "มะรืน" not in t_val:
+                    if c_dt.date() == today_date and "tomorrow" not in t_val.lower():
                         is_today = True
                 except Exception:
                     pass
@@ -2026,20 +2016,20 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
         if is_today:
             today_meetups.append(entry)
 
-    # คำแนะนำประจำวัน
+    # Daily advice
     advice_parts = []
     if rain_prob_max >= 60:
-        advice_parts.append("☔ **วันนี้มีโอกาสฝนตกสูง** อย่าลืมพกร่มและเก็บผ้าก่อนออกจากบ้านนะครับ")
+        advice_parts.append("☔ **High rain chance today.** Grab an umbrella before leaving home.")
     elif rain_prob_max >= 35:
-        advice_parts.append("🌦️ **วันนี้อาจมีฝนตกบางช่วง** ติดร่มพับไว้สักคันจะอุ่นใจกว่าครับ")
+        advice_parts.append("🌦️ **Scattered rain possible today.** Keep a compact umbrella handy.")
     else:
-        advice_parts.append("☀️ **วันนี้โอกาสฝนตกต่ำ** สภาพอากาศเหมาะกับการเดินทางและทำกิจกรรมครับ")
+        advice_parts.append("☀️ **Low rain chance today.** Great weather for outdoor activities.")
 
     if aq_warning:
         advice_parts.append(aq_warning)
 
     embed = discord.Embed(
-        title=f"🌅 สรุปข่าวสารประจำเช้าวันใหม่ • {date_header}",
+        title=f"🌅 Morning Briefing • {date_header}",
         description=(
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             + "\n".join(advice_parts)
@@ -2049,24 +2039,24 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
     )
 
     embed.add_field(
-        name="🌤️ สภาพอากาศวันนี้",
-        value=f"**{weather_desc}**\nปัจจุบัน `{temp}°C` (รู้สึก `{feels_like}°C`)\nต่ำสุด-สูงสุด `{t_min}°C - {t_max}°C` • ความชื้น `{humidity}%`",
+        name="🌤️ Today's Weather",
+        value=f"**{weather_desc}**\nCurrent `{temp}°C` (Feels like `{feels_like}°C`)\nLow-High `{t_min}°C - {t_max}°C` • Humidity `{humidity}%`",
         inline=True
     )
 
-    rain_detail = f"โอกาสสูงสุด **`{rain_prob_max}%`**"
+    rain_detail = f"Peak Chance **`{rain_prob_max}%`**"
     if rainy_hours:
-        rain_detail += f"\nช่วงเสี่ยงฝน: `{', '.join(rainy_hours[:3])}`"
+        rain_detail += f"\nRisk Window: `{', '.join(rainy_hours[:3])}`"
     else:
-        rain_detail += "\nไม่มีช่วงเสี่ยงฝนตกหนัก"
+        rain_detail += "\nNo heavy rain expected"
     embed.add_field(
-        name="☔ โอกาสฝนตก",
+        name="☔ Rain Chance",
         value=rain_detail,
         inline=True
     )
 
     embed.add_field(
-        name="😷 ค่าฝุ่น PM 2.5 & AQI",
+        name="😷 PM 2.5 & AQI",
         value=f"PM 2.5: **`{pm25_str}`**\nAQI `{aqi_val}` • {aq_status}",
         inline=False
     )
@@ -2076,24 +2066,24 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
     if today_meetups:
         meetup_lines = []
         for idx, m in enumerate(today_meetups[-5:], 1):
-            topic = clean_topic_title(m.get("topic", "ไม่ระบุ"))
+            topic = clean_topic_title(m.get("topic", "Untitled"))
             loc = m.get("location", "-")
             t_str = m.get("time", "-")
             p_cnt = m.get("participants", 0)
             max_l = m.get("max_limit")
-            p_txt = f"{p_cnt}/{max_l} คน" if max_l else f"{p_cnt} คน"
+            p_txt = f"{p_cnt}/{max_l}" if max_l else f"{p_cnt}"
             meetup_lines.append(f"`{idx}.` **{topic}** — 📍 {loc} • ⏰ `{t_str}` (👥 {p_txt})")
         meetup_summary = "\n".join(meetup_lines)
     else:
-        meetup_summary = "📭 *วันนี้ยังไม่มีรายการนัดหมาย พิมพ์ `/นัด` เพื่อชวนเพื่อนได้เลย!*"
+        meetup_summary = "📭 *No meetups scheduled for today. Type `/meetup` to organize one!*"
 
     embed.add_field(
-        name=f"📅 นัดหมายที่มีในวันนี้ ({len(today_meetups)} รายการ)",
+        name=f"📅 Today's Meetups ({len(today_meetups)} items)",
         value=meetup_summary[:1024],
         inline=False
     )
 
-    embed.set_footer(text=f"📍 พิกัด: {lat}, {lon} • ส่งอัตโนมัติทุกวันเวลา 07:30 น.")
+    embed.set_footer(text=f"📍 Coordinates: {lat}, {lon} • Sent daily at 07:30")
 
     map_buf = await generate_weather_map(lat, lon)
     view = WeatherMapView(lat, lon)
@@ -2102,41 +2092,41 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
 
 bot = MyBot()
 
-# ==================== คำสั่ง Slash Commands ====================
+# ==================== Slash Commands ====================
 
-class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการนัดหมาย'):
+class CreateMeetupModal(discord.ui.Modal, title='📅 Create Meetup'):
     topic = discord.ui.TextInput(
-        label='หัวข้อการนัดหมาย',
+        label='Topic',
         style=discord.TextStyle.short,
-        placeholder='เช่น ตีป้อม, กินหมูกระทะ, ดูหนัง',
+        placeholder='e.g. Gaming, Dinner, Movie',
         required=True,
         max_length=100,
     )
     location = discord.ui.TextInput(
-        label='สถานที่',
+        label='Location',
         style=discord.TextStyle.short,
-        placeholder='เช่น หอ A, ร้านประจำ, Major ลพบุรี',
+        placeholder='e.g. Dorm A, Regular Spot, Mall',
         required=True,
         max_length=100,
     )
     time_str = discord.ui.TextInput(
-        label='เวลา (ระบุ HH:MM เพื่อเตือนล่วงหน้า 30 นาที)',
+        label='Time (HH:MM for 30m auto-remind)',
         style=discord.TextStyle.short,
-        placeholder='เช่น วันนี้ 20:00, พรุ่งนี้ 18:30',
+        placeholder='e.g. Today 20:00, Tomorrow 14:30',
         required=True,
         max_length=50,
     )
     max_participants = discord.ui.TextInput(
-        label='จำนวนคนสูงสุด (เว้นว่าง = ไม่จำกัด)',
+        label='Max People (leave blank for unlimited)',
         style=discord.TextStyle.short,
-        placeholder='เช่น 4 (นั่งรถ), 5 (ตีป้อม) - เต็มแล้วมีคิวสำรองให้',
+        placeholder='e.g. 4, 5, 10 (full goes to waitlist)',
         required=False,
         max_length=5,
     )
     note = discord.ui.TextInput(
-        label='หมายเหตุ (ไม่ใส่ก็ได้)',
+        label='Note (optional)',
         style=discord.TextStyle.long,
-        placeholder='เช่น ใครสายจ่ายค่าข้าว, เตรียมเสื้อสีดำมา...',
+        placeholder='e.g. Late arrivals pay, wear black...',
         required=False,
         max_length=300,
     )
@@ -2151,7 +2141,7 @@ class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการ�
         max_limit = None
         if max_raw:
             if not max_raw.isdigit() or int(max_raw) <= 0:
-                await interaction.response.send_message("❌ จำนวนคนสูงสุดต้องเป็นตัวเลขจำนวนเต็มบวก เช่น `4` หรือ `5` ครับ", ephemeral=True)
+                await interaction.response.send_message("❌ Max people must be a positive integer like `4` or `5`.", ephemeral=True)
                 return
             max_limit = int(max_raw)
 
@@ -2160,8 +2150,8 @@ class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการ�
             description="━━━━━━━━━━━━━━━━━━━━━━",
             color=0x5865F2
         )
-        base_embed.set_footer(text=f"🎯 สร้างโดย {interaction.user.display_name}  •  กดยืนยันเพื่อส่งลงห้องแชท")
-        base_embed.set_author(name="🔔 ร่างการนัดหมาย", icon_url=interaction.user.display_avatar.url)
+        base_embed.set_footer(text=f"🎯 Created by {interaction.user.display_name}  •  Click confirm to post")
+        base_embed.set_author(name="🔔 Meetup Draft", icon_url=interaction.user.display_avatar.url)
 
         info = {
             "location": location_val,
@@ -2171,54 +2161,54 @@ class CreateMeetupModal(discord.ui.Modal, title='📅 สร้างการ�
             "waitlist": [],
             "tentative": [],
             "max_limit": max_limit,
-            "friend_notes": "*ยังไม่มีหมายเหตุ*",
+            "friend_notes": "*No notes yet*",
         }
         embed = rebuild_meetup_embed(base_embed, info)
         view = DraftMeetupView()
 
         await interaction.response.send_message(
-            content="นี่คือ **ร่างการนัดหมาย** (มีแค่คุณที่เห็น) \nเมื่อแก้ไขจนพอใจแล้ว ให้กดปุ่ม **📢 ยืนยันข้อมูลนัด** เพื่อส่งเข้าห้องแชทรวมครับ",
+            content="**Meetup Draft** (only you see this)\nWhen ready, click **📢 Confirm & Post** to publish to channel.",
             embed=embed,
             view=view,
             ephemeral=True
         )
 
 
-@bot.tree.command(name="นัด", description="สร้างการนัดหมาย (นัดปกติ หรือ นัดดูหนัง พร้อมระบบจำกัดคนและคิวสำรอง)")
-@app_commands.describe(ประเภท="เลือกประเภทการนัดหมาย")
-@app_commands.choices(ประเภท=[
-    app_commands.Choice(name="📝 นัดปกติ (พิมพ์สถานที่ เวลา และจำกัดจำนวนคนได้)", value="normal"),
-    app_commands.Choice(name="🎬 นัดดูหนัง (เลือกหนังจากเมเจอร์)", value="movie"),
+@bot.tree.command(name="meetup", description="Create meetup (Normal or Movie, with waitlist & limits)")
+@app_commands.describe(type="Select meetup type")
+@app_commands.choices(type=[
+    app_commands.Choice(name="📝 Normal Meetup (custom location, time, and limit)", value="normal"),
+    app_commands.Choice(name="🎬 Movie Meetup (pick movie from Major Cineplex)", value="movie"),
 ])
-async def meetup(interaction: discord.Interaction, ประเภท: app_commands.Choice[str]):
-    if ประเภท.value == "normal":
+async def meetup(interaction: discord.Interaction, type: app_commands.Choice[str]):
+    if type.value == "normal":
         await interaction.response.send_modal(CreateMeetupModal())
-    elif ประเภท.value == "movie":
+    elif type.value == "movie":
         await interaction.response.defer(ephemeral=True)
         movies = await fetch_major_movies()
 
         if not movies:
-            await interaction.followup.send("❌ ไม่พบข้อมูลรอบหนังในขณะนี้", ephemeral=True)
+            await interaction.followup.send("❌ No movie showtime data available right now.", ephemeral=True)
             return
 
         embed = discord.Embed(
-            title="🎬 เลือกหนังที่อยากดู",
-            description="━━━━━━━━━━━━━━━━━━━━━━\nเลือกหนังจาก Dropdown ด้านล่าง\nจากนั้นเลือกรอบฉาย แล้วบอทจะสร้างนัดหมายให้อัตโนมัติ!",
+            title="🎬 Pick a Movie",
+            description="━━━━━━━━━━━━━━━━━━━━━━\nSelect a movie from dropdown below.\nPick showtime and bot creates meetup automatically!",
             color=0xE50914
         )
-        embed.set_footer(text="📍 เมเจอร์ บิ๊กซี ลพบุรี")
+        embed.set_footer(text="📍 Major Cineplex Big C Lopburi")
 
         view = MovieSelectView(movies)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
-# ==================== ฟีเจอร์: ประวัตินัดหมาย ====================
+# ==================== Feature: Meetup History ====================
 
-@bot.tree.command(name="ประวัตินัด", description="ดูประวัตินัดหมายย้อนหลังของเซิร์ฟเวอร์นี้")
+@bot.tree.command(name="history", description="View past meetup history in this server")
 async def meetup_history(interaction: discord.Interaction):
     all_history = load_json(HISTORY_FILE, [])
 
-    # กรองเฉพาะประวัตินัดหมายของเซิร์ฟเวอร์ปัจจุบัน (แก้บั๊กข้อมูลข้ามเซิร์ฟเวอร์)
+    # Filter history for current guild (prevents cross-server data leak)
     guild_str = str(interaction.guild_id) if interaction.guild_id else ""
     if guild_str:
         history = [h for h in all_history if str(h.get("guild_id", "")) == guild_str]
@@ -2226,14 +2216,14 @@ async def meetup_history(interaction: discord.Interaction):
         history = all_history
 
     if not history:
-        await interaction.response.send_message("📜 ยังไม่มีประวัตินัดหมายในเซิร์ฟเวอร์นี้เลยครับ", ephemeral=True)
+        await interaction.response.send_message("📜 No meetup history in this server yet.", ephemeral=True)
         return
 
     recent = list(reversed(history[-10:]))
 
     embed = discord.Embed(
-        title="📜 ประวัตินัดหมาย",
-        description="━━━━━━━━━━━━━━━━━━━━━━\nรายการนัดหมายล่าสุด 10 ครั้งในเซิร์ฟเวอร์นี้",
+        title="📜 Meetup History",
+        description="━━━━━━━━━━━━━━━━━━━━━━\nLast 10 meetups in this server",
         color=0x5865F2
     )
 
@@ -2242,37 +2232,37 @@ async def meetup_history(interaction: discord.Interaction):
             dt = datetime.fromisoformat(entry.get("created_at", ""))
             date_str = dt.strftime("%d/%m/%Y %H:%M")
         except Exception:
-            date_str = "ไม่ทราบวัน"
+            date_str = "Date unknown"
 
-        topic = clean_topic_title(entry.get("topic", "ไม่ระบุ"))
-        location = entry.get("location", "ไม่ระบุ")
-        time_val = entry.get("time", "ไม่ระบุ")
+        topic = clean_topic_title(entry.get("topic", "Untitled"))
+        location = entry.get("location", "Not specified")
+        time_val = entry.get("time", "Not specified")
         participants = entry.get("participants", 0)
         max_limit = entry.get("max_limit")
         tentative_cnt = entry.get("tentative_count", 0)
-        created_by = entry.get("created_by", "ไม่ทราบ")
+        created_by = entry.get("created_by", "Unknown")
 
-        p_str = f"{participants}/{max_limit} คน" if max_limit else f"{participants} คน"
+        p_str = f"{participants}/{max_limit}" if max_limit else f"{participants}"
         if tentative_cnt:
-            p_str += f" (ไม่แน่ใจ {tentative_cnt})"
+            p_str += f" (Tentative {tentative_cnt})"
 
         embed.add_field(
             name=f"`{i}.` {topic}",
             value=(
                 f"📍 {location}  •  ⏰ {time_val}\n"
                 f"👥 {p_str}  •  🗓️ {date_str}\n"
-                f"สร้างโดย: {created_by}"
+                f"Created by: {created_by}"
             ),
             inline=False
         )
 
-    embed.set_footer(text=f"ทั้งหมด {len(history)} นัดหมายในเซิร์ฟเวอร์นี้")
+    embed.set_footer(text=f"Total {len(history)} meetups in this server")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# ==================== ฟีเจอร์: สรุปข่าวสารประจำวัน (Morning Briefing) ====================
+# ==================== Feature: Daily Morning Briefing ====================
 
-@bot.tree.command(name="สรุปประจำวัน", description="ดูการ์ดสรุปสภาพอากาศ ค่าฝุ่น PM 2.5 โอกาสฝนตก และนัดหมายที่มีในวันนี้")
+@bot.tree.command(name="daily", description="Daily briefing card: weather, PM 2.5, rain chance, and today's meetups")
 async def daily_briefing_cmd(interaction: discord.Interaction):
     await interaction.response.defer()
     target_lat = bot.weather_lat if bot.weather_lat is not None else 14.7995
@@ -2281,7 +2271,7 @@ async def daily_briefing_cmd(interaction: discord.Interaction):
 
     embed, map_buf, view = await build_morning_briefing_card(target_lat, target_lon, guild_str)
     if not embed:
-        await interaction.followup.send("❌ ไม่สามารถดึงข้อมูลสรุปประจำวันได้ในขณะนี้")
+        await interaction.followup.send("❌ Cannot get daily briefing right now.")
         return
 
     if map_buf:
@@ -2292,10 +2282,10 @@ async def daily_briefing_cmd(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed, view=view)
 
 
-# ==================== ฟีเจอร์: ตั้งค่าห้องแจ้งเตือนหนังใหม่ ====================
+# ==================== Feature: Movie Alert Channel Setting ====================
 
-@bot.tree.command(name="ตั้งค่าแจ้งเตือนหนัง", description="ตั้งค่าห้องแชทที่ต้องการให้บอทแจ้งเตือนหนังใหม่")
-@app_commands.describe(channel="เลือกห้องแชท (ถ้าไม่เลือกจะใช้ห้องปัจจุบัน)")
+@bot.tree.command(name="set-movie-channel", description="Set channel for new movie release alerts")
+@app_commands.describe(channel="Select channel (current channel if empty)")
 async def set_movie_channel(interaction: discord.Interaction, channel: discord.TextChannel = None):
     await interaction.response.defer(ephemeral=True)
     try:
@@ -2307,15 +2297,15 @@ async def set_movie_channel(interaction: discord.Interaction, channel: discord.T
         save_config(config)
 
         embed = discord.Embed(
-            title="✅ ตั้งค่าสำเร็จ!",
-            description=f"บอทจะส่งแจ้งเตือนหนังเข้าใหม่ไปที่ {target_channel.mention}\n\nระบบจะเช็คหนังใหม่ทุกๆ 1 ชั่วโมงอัตโนมัติ",
+            title="✅ Config Saved!",
+            description=f"Bot will send new movie alerts to {target_channel.mention}\n\nAuto-checks hourly.",
             color=0x57F287
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ เกิดข้อผิดพลาด: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-# ==================== ดึงข้อมูลหนัง ====================
+# ==================== Fetch Movie Data ====================
 
 async def fetch_major_movies():
     url = "https://www.majorcineplex.com/cinema/bigc-lopburi/"
@@ -2365,7 +2355,7 @@ async def fetch_major_movies():
 
             return list(movie_dict.values())
 
-# ==================== เช็ครอบหนัง ====================
+# ==================== Movie Showtimes ====================
 
 class MovieTrailerView(discord.ui.View):
     def __init__(self, movies):
@@ -2373,24 +2363,24 @@ class MovieTrailerView(discord.ui.View):
         for movie in movies[:25]:
             trailer_url = get_trailer_url(movie['name'])
             self.add_item(discord.ui.Button(
-                label=f"▶️ ตัวอย่าง: {movie['name'][:35]}",
+                label=f"▶️ Trailer: {movie['name'][:35]}",
                 style=discord.ButtonStyle.link,
                 url=trailer_url
             ))
 
-@bot.tree.command(name="เช็คหนัง", description="เช็ครอบหนังและดูตัวอย่างหนังที่เมเจอร์ บิ๊กซี ลพบุรี")
+@bot.tree.command(name="movies", description="Check movie showtimes and trailers at Major Cineplex Big C Lopburi")
 async def check_movies_cmd(interaction: discord.Interaction):
     await interaction.response.defer()
     movies = await fetch_major_movies()
 
     if not movies:
-        await interaction.followup.send("ไม่พบข้อมูลรอบหนังในขณะนี้")
+        await interaction.followup.send("No movie showtime data available right now.")
         return
 
     embeds = []
     intro_embed = discord.Embed(
-        title="🍿 รอบหนังเมเจอร์ บิ๊กซี ลพบุรี วันนี้",
-        description="กดปุ่มด้านล่างหรือคลิกลิงก์ในการ์ดเพื่อดูตัวอย่างหนัง (Trailer) บน YouTube ได้เลย!",
+        title="🍿 Today's Movies at Major Cineplex Big C Lopburi",
+        description="Click buttons below or links in cards to watch trailers on YouTube!",
         color=discord.Color.red()
     )
     embeds.append(intro_embed)
@@ -2401,8 +2391,8 @@ async def check_movies_cmd(interaction: discord.Interaction):
         embed = discord.Embed(title=f"🎬 {movie['name']}", color=discord.Color.red())
 
         showtimes_fmt = " ".join([f"` {t} `" for t in movie['showtimes']])
-        embed.add_field(name="⏰ รอบฉาย", value=showtimes_fmt[:1024], inline=False)
-        embed.add_field(name="🎞️ ตัวอย่างหนัง (Trailer)", value=f"[▶️ คลิกดูตัวอย่างบน YouTube]({trailer_url})", inline=False)
+        embed.add_field(name="⏰ Showtimes", value=showtimes_fmt[:1024], inline=False)
+        embed.add_field(name="🎞️ Trailer", value=f"[▶️ Watch on YouTube]({trailer_url})", inline=False)
 
         if movie['image']:
             embed.set_thumbnail(url=movie['image'])
@@ -2412,10 +2402,10 @@ async def check_movies_cmd(interaction: discord.Interaction):
     view = MovieTrailerView(display_movies)
     await interaction.followup.send(embeds=embeds[:10], view=view)
 
-# ==================== แจ้งเตือนฝนตก & เช็คสภาพอากาศ ====================
+# ==================== Rain Alert & Weather Check ====================
 
 def _metno_symbol_to_wmo(symbol: str) -> int:
-    """แปลง symbol_code จาก MET Norway เป็นรหัส WMO สำหรับแสดงผลภาษาไทย"""
+    """Convert MET Norway symbol_code to WMO code."""
     s = (symbol or "").lower()
     if "thunder" in s:
         return 95
@@ -2439,7 +2429,7 @@ def _metno_symbol_to_wmo(symbol: str) -> int:
 
 
 async def _fetch_weather_and_aq_data(lat: float, lon: float, forecast_days: int = 2) -> tuple[dict, dict]:
-    """ดึงข้อมูลสภาพอากาศและค่าฝุ่น PM 2.5 (รองรับ SSL บน Python 3.14 และมีระบบสำรอง MET Norway หาก Open-Meteo ติด Rate Limit บน Render)"""
+    """Fetch weather and PM 2.5 data (Open-Meteo with MET Norway fallback on Render rate limits)."""
     weather_url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat}&longitude={lon}"
@@ -2474,7 +2464,7 @@ async def _fetch_weather_and_aq_data(lat: float, lon: float, forecast_days: int 
             except Exception:
                 aq_data = {}
 
-        # ระบบสำรองอัตโนมัติ: หาก Open-Meteo ติด Rate Limit (429) บน IP ของ Render ให้ดึงจาก MET Norway แทนทันที
+        # Fallback: If Open-Meteo hits rate limit (429) on Render, fetch from MET Norway immediately
         if not data or "current" not in data:
             try:
                 met_url = f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={lat:.4f}&lon={lon:.4f}"
@@ -2541,28 +2531,28 @@ async def _fetch_weather_and_aq_data(lat: float, lon: float, forecast_days: int 
 
 
 def translate_weather_code(code: int) -> str:
-    """แปลงรหัสสภาพอากาศ WMO เป็นข้อความภาษาไทยพร้อมอีโมจิ"""
+    """Translate WMO weather code to English description with emoji."""
     weather_map = {
-        0: "☀️ ท้องฟ้าแจ่มใส",
-        1: "🌤️ แจ่มใสเป็นส่วนใหญ่",
-        2: "⛅ มีเมฆบางส่วน",
-        3: "☁️ มีเมฆมาก (มืดครึ้ม)",
-        45: "🌫️ มีหมอก",
-        48: "🌫️ มีหมอกลงจัด",
-        51: "🌦️ ฝนตกปรอยๆ เบาบาง",
-        53: "🌦️ ฝนตกปรอยๆ ปานกลาง",
-        55: "🌧️ ฝนตกปรอยๆ ค่อนข้างหนัก",
-        61: "🌧️ ฝนตกเล็กน้อย",
-        63: "🌧️ ฝนตกปานกลาง",
-        65: "🌧️ ฝนตกหนัก",
-        80: "🌦️ ฝนฟ้าคะนองเป็นแห่งๆ (เบา)",
-        81: "🌧️ ฝนฟ้าคะนองปานกลาง",
-        82: "⛈️ ฝนฟ้าคะนองรุนแรง",
-        95: "⛈️ พายุฝนฟ้าคะนอง",
-        96: "⛈️ พายุฝนฟ้าคะนองและลูกเห็บเล็กน้อย",
-        99: "⛈️ พายุฝนฟ้าคะนองรุนแรง",
+        0: "☀️ Clear Sky",
+        1: "🌤️ Mainly Clear",
+        2: "⛅ Partly Cloudy",
+        3: "☁️ Overcast",
+        45: "🌫️ Fog",
+        48: "🌫️ Depositing Rime Fog",
+        51: "🌦️ Light Drizzle",
+        53: "🌦️ Moderate Drizzle",
+        55: "🌧️ Dense Drizzle",
+        61: "🌧️ Slight Rain",
+        63: "🌧️ Moderate Rain",
+        65: "🌧️ Heavy Rain",
+        80: "🌦️ Slight Rain Showers",
+        81: "🌧️ Moderate Rain Showers",
+        82: "⛈️ Violent Rain Showers",
+        95: "⛈️ Thunderstorm",
+        96: "⛈️ Thunderstorm with Slight Hail",
+        99: "⛈️ Thunderstorm with Heavy Hail",
     }
-    return weather_map.get(code, f"🌤️ สภาพอากาศทั่วไป (Code {code})")
+    return weather_map.get(code, f"🌤️ Weather Code {code}")
 
 class WeatherMapView(discord.ui.View):
     def __init__(self, lat: float, lon: float):
@@ -2570,18 +2560,18 @@ class WeatherMapView(discord.ui.View):
         windy_url = f"https://www.windy.com/{lat}/{lon}?radar,{lat},{lon},9"
         gmaps_url = f"https://www.google.com/maps?q={lat},{lon}"
         self.add_item(discord.ui.Button(
-            label="🗺️ ดูเรดาร์ฝนสดแบบโต้ตอบ (Windy)",
+            label="🗺️ Live Interactive Radar (Windy)",
             style=discord.ButtonStyle.link,
             url=windy_url
         ))
         self.add_item(discord.ui.Button(
-            label="📍 เปิดพิกัดใน Google Maps",
+            label="📍 Open in Google Maps",
             style=discord.ButtonStyle.link,
             url=gmaps_url
         ))
 
 def _compose_weather_map_sync(coords, tile_xy, base_tiles, radar_parent_map, offset_x, offset_y):
-    """ฟังก์ชันประมวลผลภาพเรดาร์ฝนด้วย Pillow (รันใน Thread แยกเพื่อไม่ให้บล็อก Event Loop)"""
+    """Process radar image with Pillow in background thread to avoid blocking event loop."""
     canvas = Image.new("RGBA", (256 * 3, 256 * 3), (230, 236, 240, 255))
     for idx, (gx, gy) in enumerate(coords):
         tile_img = base_tiles[idx]
@@ -2636,7 +2626,7 @@ def _compose_weather_map_sync(coords, tile_xy, base_tiles, radar_parent_map, off
     return buf
 
 async def generate_weather_map(lat: float, lon: float, zoom: int = 8):
-    """สร้างภาพแผนที่พร้อมเลเยอร์เรดาร์ฝนสด (RainViewer + OpenStreetMap) และปักหมุดพิกัด"""
+    """Generate map image with live rain radar layer (RainViewer + OpenStreetMap) and location pin."""
     try:
         lat_rad = math.radians(lat)
         n = 2.0 ** zoom
@@ -2704,11 +2694,11 @@ async def generate_weather_map(lat: float, lon: float, zoom: int = 8):
         print(f"Error generating weather map: {e}")
         return None
 
-@bot.tree.command(name="ตั้งค่าแจ้งเตือนฝนตก", description="ตั้งค่าห้องแจ้งเตือนฝนตกและสรุปตอนเช้า (07:30 น.) พร้อมระบุละติจูดและลองจิจูด")
+@bot.tree.command(name="set-weather-channel", description="Set rain alert and morning briefing (07:30) channel and coordinates")
 @app_commands.describe(
-    lat="ละติจูด (Latitude) เช่น 14.7995",
-    lon="ลองจิจูด (Longitude) เช่น 100.6534",
-    channel="เลือกห้องแชท (ถ้าไม่เลือกจะใช้ห้องปัจจุบัน)"
+    lat="Latitude, e.g. 14.7995",
+    lon="Longitude, e.g. 100.6534",
+    channel="Select channel (current channel if empty)"
 )
 async def set_weather_channel(interaction: discord.Interaction, lat: float, lon: float, channel: discord.TextChannel = None):
     await interaction.response.defer(ephemeral=True)
@@ -2726,11 +2716,11 @@ async def set_weather_channel(interaction: discord.Interaction, lat: float, lon:
         save_config(config)
 
         embed = discord.Embed(
-            title="✅ ตั้งค่าพยากรณ์อากาศ & สรุปประจำวันสำเร็จ!",
+            title="✅ Weather & Daily Briefing Configured!",
             description=(
-                f"บอทจะส่งแจ้งเตือนฝนตกและ **🌅 สรุปข่าวสารตอนเช้า (07:30 น.)** ไปที่ {target_channel.mention}\n\n"
-                f"📍 **พิกัด:** `{lat}, {lon}`\n"
-                f"⏱️ เมื่อพบแนวโน้มฝนตก บอทจะแจ้งเตือน **1 ครั้ง** และเว้นระยะรออีก **30 นาที**"
+                f"Bot will send rain alerts and **🌅 Morning Briefing (07:30)** to {target_channel.mention}\n\n"
+                f"📍 **Coordinates:** `{lat}, {lon}`\n"
+                f"⏱️ When rain is detected, bot alerts **once** and cools down for **30 minutes**."
             ),
             color=0x3498DB
         )
@@ -2748,35 +2738,35 @@ async def set_weather_channel(interaction: discord.Interaction, lat: float, lon:
         else:
             bot.check_weather.start()
     except Exception as e:
-        await interaction.followup.send(f"❌ เกิดข้อผิดพลาด: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 def evaluate_air_quality(pm25: float, aqi: int):
-    """ประเมินระดับคุณภาพอากาศและค่าฝุ่น PM 2.5 ตามเกณฑ์มาตรฐานไทย"""
+    """Evaluate air quality and PM 2.5 levels according to standard thresholds."""
     if pm25 is None:
-        return "ไม่ทราบค่า", None, False
+        return "No data", None, False
     if pm25 <= 15.0:
-        return "🟦 ดีมาก (อากาศสะอาด)", None, False
+        return "🟦 Excellent (Clean Air)", None, False
     elif pm25 <= 25.0:
-        return "🟩 ดี (ปกติ)", None, False
+        return "🟩 Good (Normal)", None, False
     elif pm25 <= 37.5:
-        return "🟨 ปานกลาง", None, False
+        return "🟨 Moderate", None, False
     elif pm25 <= 75.0:
         return (
-            "🟧 เริ่มมีผลกระทบต่อสุขภาพ!",
-            "⚠️ **คำเตือนฝุ่น PM 2.5 เกินมาตรฐาน!** (`> 37.5 µg/m³`) ควรสวมหน้ากากป้องกันฝุ่นเมื่อออกนอกอาคาร",
+            "🟧 Unhealthy for Sensitive Groups!",
+            "⚠️ **PM 2.5 warning!** (`> 37.5 µg/m³`) Wear a dust mask outdoors.",
             True
         )
     else:
         return (
-            "🟥 อันตรายต่อสุขภาพรุนแรง!",
-            "🚨 **เตือนภัยฝุ่น PM 2.5 หนาจัด!** (`> 75.0 µg/m³`) งดกิจกรรมกลางแจ้งและสวมหน้ากาก N95 ทันที",
+            "🟥 Very Unhealthy / Hazardous!",
+            "🚨 **Severe PM 2.5 warning!** (`> 75.0 µg/m³`) Avoid outdoor activities and wear N95 mask.",
             True
         )
 
-@bot.tree.command(name="เช็คสภาพอากาศ", description="เช็คสภาพอากาศ ค่าฝุ่น PM 2.5 และเรดาร์ฝนสด ณ ปัจจุบัน")
+@bot.tree.command(name="weather", description="Check current weather, PM 2.5, and live rain radar")
 @app_commands.describe(
-    lat="ละติจูด (ถ้าไม่ใส่จะใช้พิกัดที่ตั้งค่าไว้ หรือลพบุรีเป็นค่าเริ่มต้น)",
-    lon="ลองจิจูด (ถ้าไม่ใส่จะใช้พิกัดที่ตั้งค่าไว้ หรือลพบุรีเป็นค่าเริ่มต้น)"
+    lat="Latitude (default: saved config or Lopburi)",
+    lon="Longitude (default: saved config or Lopburi)"
 )
 async def check_weather_cmd(interaction: discord.Interaction, lat: float = None, lon: float = None):
     await interaction.response.defer()
@@ -2787,7 +2777,7 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
     try:
         data, aq_data = await _fetch_weather_and_aq_data(target_lat, target_lon, forecast_days=2)
         if not data or "current" not in data:
-            await interaction.followup.send("❌ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้")
+            await interaction.followup.send("❌ Cannot get weather data right now.")
             return
 
         current = data.get("current", {})
@@ -2802,7 +2792,7 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
         pm25_val = aq_current.get("pm2_5")
         aqi_val = aq_current.get("us_aqi", "-")
         aq_status, aq_warning, is_dust_high = evaluate_air_quality(pm25_val, aqi_val)
-        pm25_str = f"{pm25_val} µg/m³" if pm25_val is not None else "ไม่มีข้อมูล"
+        pm25_str = f"{pm25_val} µg/m³" if pm25_val is not None else "No data"
 
         now = now_thai()
         now_str = now.strftime("%Y-%m-%dT%H:00")
@@ -2828,9 +2818,9 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
             icon = translate_weather_code(c_val).split(" ")[0]
             if p_val > max_rain_prob:
                 max_rain_prob = p_val
-            forecast_lines.append(f"` {t_label} ` {icon} **{t_val}°C** • ☔ โอกาสฝนตก `{p_val}%`")
+            forecast_lines.append(f"` {t_label} ` {icon} **{t_val}°C** • ☔ Rain `{p_val}%`")
 
-        forecast_text = "\n".join(forecast_lines) if forecast_lines else "ไม่มีข้อมูลพยากรณ์"
+        forecast_text = "\n".join(forecast_lines) if forecast_lines else "No forecast data"
 
         if is_dust_high:
             card_color = 0xE67E22 if (pm25_val and pm25_val <= 75.0) else 0xE74C3C
@@ -2842,22 +2832,22 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
             desc_text += f"\n{aq_warning}\n━━━━━━━━━━━━━━━━━━━━━━"
 
         embed = discord.Embed(
-            title="🌤️ รายงานสภาพอากาศ • ค่าฝุ่น PM 2.5 & เรดาร์ฝนสด",
+            title="🌤️ Weather Report • PM 2.5 & Live Rain Radar",
             description=desc_text,
             color=card_color
         )
-        embed.add_field(name="🌡️ อุณหภูมิ", value=f"```{temp} °C```", inline=True)
-        embed.add_field(name="🥵 รู้สึกเหมือน", value=f"```{feels_like} °C```", inline=True)
-        embed.add_field(name="💧 ความชื้น", value=f"```{humidity} %```", inline=True)
-        embed.add_field(name="💨 ความเร็วลม", value=f"```{wind} km/h```", inline=True)
-        embed.add_field(name="☔ โอกาสฝนตกสูงสุด", value=f"```{max_rain_prob} %```", inline=True)
-        embed.add_field(name="📍 พิกัด", value=f"```{target_lat}, {target_lon}```", inline=True)
+        embed.add_field(name="🌡️ Temperature", value=f"```{temp} °C```", inline=True)
+        embed.add_field(name="🥵 Feels Like", value=f"```{feels_like} °C```", inline=True)
+        embed.add_field(name="💧 Humidity", value=f"```{humidity} %```", inline=True)
+        embed.add_field(name="💨 Wind Speed", value=f"```{wind} km/h```", inline=True)
+        embed.add_field(name="☔ Max Rain Chance", value=f"```{max_rain_prob} %```", inline=True)
+        embed.add_field(name="📍 Coordinates", value=f"```{target_lat}, {target_lon}```", inline=True)
         embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        embed.add_field(name="😷 ค่าฝุ่น PM 2.5", value=f"```{pm25_str}```", inline=True)
-        embed.add_field(name="📊 ดัชนีคุณภาพอากาศ (AQI)", value=f"```AQI {aqi_val} • {aq_status}```", inline=True)
+        embed.add_field(name="😷 PM 2.5", value=f"```{pm25_str}```", inline=True)
+        embed.add_field(name="📊 Air Quality (AQI)", value=f"```AQI {aqi_val} • {aq_status}```", inline=True)
         embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        embed.add_field(name="🕒 พยากรณ์ล่วงหน้า (รายชั่วโมง)", value=forecast_text, inline=False)
-        embed.set_footer(text=f"🗺️ แผนที่เรดาร์ฝนสด (จุดสีแดงคือพิกัดของคุณ) • อัพเดท {now.strftime('%d/%m/%Y %H:%M')} น.")
+        embed.add_field(name="🕒 Hourly Forecast", value=forecast_text, inline=False)
+        embed.set_footer(text=f"🗺️ Live Rain Radar (red dot = your location) • Updated {now.strftime('%d/%m/%Y %H:%M')}")
 
         map_buf = await generate_weather_map(target_lat, target_lon)
         view = WeatherMapView(target_lat, target_lon)
@@ -2868,12 +2858,12 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
         else:
             await interaction.followup.send(embed=embed, view=view)
     except Exception as e:
-        await interaction.followup.send(f"❌ เกิดข้อผิดพลาดในการเช็คสภาพอากาศ: {e}")
+        await interaction.followup.send(f"❌ Weather check error: {e}")
 
-# ==================== รัน ====================
+# ==================== Runner ====================
 
 def _reset_bot_session():
-    """รีเซ็ต HTTP Session และสถานะภายในของบอทเพื่อให้ลองล็อกอินใหม่ได้โดยไม่เกิด Session is closed"""
+    """Reset HTTP session and internal bot state to allow clean reconnection."""
     try:
         bot._closing_task = None
         bot.http.connector = discord.utils.MISSING
@@ -2890,7 +2880,7 @@ if __name__ == '__main__':
         clean_token = clean_token[4:].strip()
 
     if clean_token == 'YOUR_BOT_TOKEN_HERE' or not clean_token:
-        err_msg = "❌ ไม่พบค่า DISCORD_TOKEN! กรุณาตั้งค่า DISCORD_TOKEN ในเมนู Environment ของ Render.com"
+        err_msg = "❌ DISCORD_TOKEN not found! Set DISCORD_TOKEN in Render environment."
         print(err_msg, flush=True)
         set_bot_status(False, err_msg)
         import time
@@ -2906,7 +2896,7 @@ if __name__ == '__main__':
                 bot.run(clean_token, log_handler=None)
                 break
             except discord.LoginFailure as e:
-                err_msg = f"❌ DISCORD_TOKEN ไม่ถูกต้อง (ถูก Reset หรือก๊อปปี้มาไม่ครบ): {e}"
+                err_msg = f"❌ Invalid DISCORD_TOKEN: {e}"
                 print(err_msg, flush=True)
                 set_bot_status(False, err_msg)
                 while True:
@@ -2914,16 +2904,16 @@ if __name__ == '__main__':
             except discord.HTTPException as e:
                 status_code = getattr(e, 'status', 429)
                 err_msg = (
-                    f"⚠️ Discord บล็อก IP ของเครื่อง Render ชั่วคราว (HTTP {status_code} Rate Limit - ครั้งที่ {attempt}) "
-                    f"— กำลังรอ 60 วินาทีเพื่อลองเชื่อมต่อใหม่อัตโนมัติ... "
-                    f"(💡 หากติดนาน แนะนำให้สร้าง Web Service ใหม่บน Render โดยเลือก Region เป็น Singapore หรือ Frankfurt เพื่อเปลี่ยน IP)"
+                    f"⚠️ Discord IP rate limit on Render (HTTP {status_code} - attempt {attempt}) "
+                    f"— waiting 60s to retry automatically... "
+                    f"(💡 Tip: recreate Render Web Service with Region Singapore or Frankfurt to switch IP)"
                 )
                 print(err_msg, flush=True)
                 set_bot_status(False, err_msg)
                 time.sleep(60)
                 _reset_bot_session()
             except Exception as e:
-                err_msg = f"❌ เชื่อมต่อ Discord ไม่สำเร็จ (ครั้งที่ {attempt}): {e} — รอ 30 วินาทีเพื่อลองใหม่..."
+                err_msg = f"❌ Discord connection failed (attempt {attempt}): {e} — retrying in 30s..."
                 print(err_msg, flush=True)
                 set_bot_status(False, err_msg)
                 time.sleep(30)

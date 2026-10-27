@@ -50,19 +50,19 @@ def _theme_color(info: dict) -> int:
         return 0xE67E22
     return 0x5865F2
 
-def _progress_bar(current: int, total: int = None, length: int = 10) -> str:
-    """Create text progress bar (e.g. ██████░░░░ 3/5 (60%))"""
+def _progress_bar(current: int, total: int = None, length: int = 8) -> str:
+    """Create sleek text progress bar (e.g. ▰▰▰▰▱▱▱▱ 3/5 (60%))"""
     if total and total > 0:
         ratio = max(0.0, min(1.0, current / total))
         filled = int(round(ratio * length))
         empty = length - filled
-        bar = "█" * filled + "░" * empty
-        status_suffix = " (FULL!)" if current >= total else f" ({int(round(ratio * 100))}%)"
+        bar = "▰" * filled + "▱" * empty
+        status_suffix = " (Full)" if current >= total else f" ({int(round(ratio * 100))}%)"
         return f"{bar} {current}/{total}{status_suffix}"
     else:
         filled = max(0, min(length, current))
         empty = length - filled
-        bar = "█" * filled + "░" * empty
+        bar = "▰" * filled + "▱" * empty
         return f"{bar} {current}"
 
 from keep_alive import keep_alive
@@ -305,9 +305,9 @@ def parse_meetup_embed(embed: discord.Embed) -> dict:
         fname = field.name or ""
         fval = field.value or ""
         if "Location" in fname:
-            location = fval.replace("```", "").strip()
+            location = fval.replace("```", "").replace("**", "").strip()
         elif "Time" in fname:
-            time_val = fval.replace("```", "").strip()
+            time_val = fval.replace("```", "").replace("**", "").strip()
         elif "📌 Note" in fname:
             pin_note = re.sub(r'^>\s*', '', fval).strip()
         elif "People" in fname or "Count" in fname:
@@ -350,7 +350,7 @@ def parse_meetup_embed(embed: discord.Embed) -> dict:
     }
 
 def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
-    """Update and format fields in meetup card."""
+    """Update and format fields in meetup card with clean visual hierarchy."""
     location = info.get("location", "-")
     time_val = info.get("time_val", "-")
     pin_note = info.get("pin_note")
@@ -365,17 +365,17 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
 
     if checkin_mode:
         if count > 0 and len(checkins) >= count:
-            status_line = "🟢 **Status:** Time now. All arrived! 🎉"
+            status_line = "> 🟢 **Status:** Event active • All attendees arrived! 🎉"
         else:
-            status_line = "🟢 **Status:** Time now. Check-in open 📍"
+            status_line = "> 🟢 **Status:** Event active • Check-in is open 📍"
     elif max_limit and max_limit > 0 and count >= max_limit:
-        status_line = "🟠 **Status:** Full limit reached. Join goes to waitlist ⏳"
+        status_line = "> 🟠 **Status:** Capacity reached • New sign-ups join waitlist ⏳"
     else:
-        status_line = "🔵 **Status:** Open for sign-ups"
+        status_line = "> 🔵 **Status:** Open for sign-ups"
 
     new_embed = discord.Embed(
         title=embed.title,
-        description=f"{status_line}\n━━━━━━━━━━━━━━━━━━━━━━",
+        description=status_line,
         color=_theme_color(info)
     )
     if embed.author and embed.author.name:
@@ -385,36 +385,30 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
     if embed.footer and embed.footer.text:
         new_embed.set_footer(text=embed.footer.text)
 
-    new_embed.add_field(name=f"{EMOJI['location']} Location", value=f"```{location}```", inline=True)
-    new_embed.add_field(name=f"{EMOJI['time']} Time", value=f"```{time_val}```", inline=True)
+    # Core Event Metadata
+    new_embed.add_field(name=f"{EMOJI['location']} Location", value=f"**{location}**", inline=True)
+    new_embed.add_field(name=f"{EMOJI['time']} Time", value=f"**{time_val}**", inline=True)
 
-    if pin_note:
-        new_embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        new_embed.add_field(name="📌 Note", value=f"> {pin_note}", inline=False)
+    # Attendance & Progress
+    prog = _progress_bar(count, max_limit, length=8)
+    new_embed.add_field(name=f"{EMOJI['count']} Attendance", value=f"`{prog}`", inline=True)
 
-    new_embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-
-    # Participant count & checkin status (progress bar)
-    prog = _progress_bar(count, max_limit, length=10)
-    count_str = f"` {prog} `"
-
-    new_embed.add_field(name=f"{EMOJI['count']} People", value=count_str, inline=True)
     if checkin_mode:
         checkin_bar = _progress_bar(len(checkins), count, length=8) if count > 0 else "0/0"
-        new_embed.add_field(name=f"{EMOJI['checkin']} Checked In", value=f"` {checkin_bar} `", inline=True)
-        new_embed.add_field(name="\u200b", value="\u200b", inline=True)
+        new_embed.add_field(name=f"{EMOJI['checkin']} Checked In", value=f"`{checkin_bar}`", inline=True)
     else:
         new_embed.add_field(name=f"{EMOJI['tentative']} Tentative", value=f"` {len(tentative)} `", inline=True)
         if max_limit and max_limit > 0:
             new_embed.add_field(name=f"{EMOJI['waitlist']} Waitlist", value=f"` {len(waitlist)} `", inline=True)
-        else:
-            new_embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    if pin_note:
+        new_embed.add_field(name="📌 Pinned Note", value=f"> {pin_note}", inline=False)
 
     # Confirmed participants
     if going:
-        going_val = ">>> " + "\n".join(going)
+        going_val = "\n".join([f"`{idx:02d}.` {m}" for idx, m in enumerate(going, 1)])
     else:
-        going_val = "*No one yet*"
+        going_val = "*No one signed up yet — be the first to join!*"
     new_embed.add_field(name="👥 Going", value=going_val[:1024], inline=False)
 
     # Show waitlist and tentative only in normal sign-up mode
@@ -427,7 +421,7 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
             new_embed.add_field(name="⏳ Waitlist (Auto-promotes on drop)", value=waitlist_val[:1024], inline=False)
 
         if tentative:
-            tentative_val = ">>> " + "\n".join(tentative)
+            tentative_val = "\n".join([f"• {m}" for m in tentative])
         else:
             tentative_val = "*None*"
         new_embed.add_field(name="🤔 Tentative", value=tentative_val[:1024], inline=False)
@@ -436,17 +430,16 @@ def rebuild_meetup_embed(embed: discord.Embed, info: dict) -> discord.Embed:
     if checkin_mode or checkins:
         if checkins:
             checkin_lines = [
-                f"`{idx}.` {c['mention']}"
+                f"`{idx:02d}.` {c['mention']}"
                 for idx, c in enumerate(checkins, 1)
             ]
             if count > 0 and len(checkins) >= count:
-                checkin_lines.append("🎉 **All arrived!**")
+                checkin_lines.append("🎉 **All attendees arrived!**")
             checkin_val = "\n".join(checkin_lines)
         else:
             checkin_val = "*No one checked in yet*"
         new_embed.add_field(name="📍 Arrived", value=checkin_val[:1024], inline=False)
 
-    new_embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
     new_embed.add_field(name="📋 Friend Notes", value=friend_notes[:1024], inline=False)
 
     return new_embed
@@ -590,12 +583,11 @@ async def _open_notify_panel(interaction: discord.Interaction):
             break
 
     panel_embed = discord.Embed(
-        title=f"🔔 Notification Panel: {info['topic']}",
+        title=f"🔔 Notification Panel • {info['topic']}",
         description=(
-            "Select notification target to avoid spamming server:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👥 **Going:** `{len(info['going'])}` (Checked in: `{len(info['checkins'])}`)\n"
-            f"🤔 **Tentative / Waitlist:** `{len(info['tentative']) + len(info['waitlist'])}`\n"
+            "> Select an action below to notify attendees without server-wide spam.\n\n"
+            f"👥 **Going:** `{len(info['going'])}` attendees (Checked in: `{len(info['checkins'])}`)\n"
+            f"🤔 **Tentative / Waitlist:** `{len(info['tentative']) + len(info['waitlist'])}` members\n"
             f"⏰ **Auto Reminder:** {remind_status}"
         ),
         color=0x5865F2
@@ -610,12 +602,11 @@ async def _open_update_options(interaction: discord.Interaction):
     info = parse_meetup_embed(embed)
     mode_str = "📍 Check-in Mode (Time now)" if info["checkin_mode"] else "📝 Normal Sign-up Mode"
     panel_embed = discord.Embed(
-        title=f"✏️ Update Meetup: {info['topic']}",
+        title=f"✏️ Manage Meetup • {info['topic']}",
         description=(
-            f"Current status: **{mode_str}**\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "• Click **📍 Time now (Open Check-in)** to open check-in.\n"
-            "• Click **📝 Edit Details** to edit location, time, or limits."
+            f"> Current Status: **{mode_str}**\n\n"
+            "• **📍 Time now (Open Check-in):** Switch to live arrival check-in mode.\n"
+            "• **📝 Edit Details:** Update location, time, or participant limit."
         ),
         color=0x5865F2
     )
@@ -625,9 +616,8 @@ async def _open_update_options(interaction: discord.Interaction):
 
 class MeetupView(discord.ui.View):
     """Buttons for meetup card during normal sign-up mode:
-    - Row 0: Main action (Join / Leave)
-    - Row 1: Backup status (Tentative)
-    - Row 2: Management tools (Add Note / Remind / Update)
+    - Row 0: Attendance actions (Join / Tentative / Leave)
+    - Row 1: Management tools (Add Note / Remind / Update)
     """
     def __init__(self):
         super().__init__(timeout=None)
@@ -727,7 +717,7 @@ class MeetupView(discord.ui.View):
                 allowed_mentions=discord.AllowedMentions(users=True)
             )
 
-    @discord.ui.button(label="Tentative", style=discord.ButtonStyle.primary, custom_id="tentative_meetup", row=1, emoji=EMOJI["tentative"])
+    @discord.ui.button(label="Tentative", style=discord.ButtonStyle.primary, custom_id="tentative_meetup", row=0, emoji=EMOJI["tentative"])
     async def tentative_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = interaction.message.embeds[0]
         info = parse_meetup_embed(embed)
@@ -769,15 +759,15 @@ class MeetupView(discord.ui.View):
                 allowed_mentions=discord.AllowedMentions(users=True)
             )
 
-    @discord.ui.button(label="Add Note", style=discord.ButtonStyle.secondary, custom_id="note_meetup", row=2, emoji=EMOJI["note"])
+    @discord.ui.button(label="Add Note", style=discord.ButtonStyle.secondary, custom_id="note_meetup", row=1, emoji=EMOJI["note"])
     async def note_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(NoteModal())
 
-    @discord.ui.button(label="Remind", style=discord.ButtonStyle.secondary, custom_id="notify_meetup", row=2, emoji=EMOJI["notify"])
+    @discord.ui.button(label="Remind", style=discord.ButtonStyle.secondary, custom_id="notify_meetup", row=1, emoji=EMOJI["notify"])
     async def notify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await _open_notify_panel(interaction)
 
-    @discord.ui.button(label="Update", style=discord.ButtonStyle.secondary, custom_id="edit_meetup", row=2, emoji=EMOJI["edit"])
+    @discord.ui.button(label="Update", style=discord.ButtonStyle.secondary, custom_id="edit_meetup", row=1, emoji=EMOJI["edit"])
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await _open_update_options(interaction)
 
@@ -961,13 +951,13 @@ class PingNotArrivedView(discord.ui.View):
         mentions_str = " ".join(not_arrived)
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🏃‍♂️ Ping Missing Friends: {info['topic']}",
+            title=f"🏃‍♂️ Roll Call • {info['topic']}",
             description=(
-                f"📍 **Location:** `{info['location']}`\n"
-                f"⏰ **Time:** `{info['time_val']}`\n"
-                f"✅ **Arrived ({len(checked_in_mentions)}/{len(info['going'])}):** {' '.join(checked_in_mentions) if checked_in_mentions else '-'}\n"
-                f"💡 *Remember to click **📍 I'm Here!** on meetup card.*\n"
-                f"🔗 [Open Meetup Card]({jump_url})"
+                f"> 📍 **Location:** `{info['location']}`\n"
+                f"> ⏰ **Time:** `{info['time_val']}`\n\n"
+                f"✅ **Checked In ({len(checked_in_mentions)}/{len(info['going'])}):** {' '.join(checked_in_mentions) if checked_in_mentions else '*None yet*'}\n"
+                f"🏃‍♂️ **Missing ({len(not_arrived)}):** {' '.join(not_arrived)}\n\n"
+                f"🔗 [Open Meetup Card to Check In]({jump_url})"
             ),
             color=0xE67E22
         )
@@ -1023,10 +1013,10 @@ class SmartNotifyView(discord.ui.View):
         mentions_str = " ".join(info["going"])
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🔔 Meetup Alert: {info['topic']}",
+            title=f"🔔 Meetup Alert • {info['topic']}",
             description=(
-                f"📍 **Location:** `{info['location']}`\n"
-                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"> 📍 **Location:** `{info['location']}`\n"
+                f"> ⏰ **Time:** `{info['time_val']}`\n\n"
                 f"🔗 [Open Meetup Card]({jump_url})"
             ),
             color=0x2ECC71
@@ -1058,11 +1048,11 @@ class SmartNotifyView(discord.ui.View):
         mentions_str = " ".join(targets)
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🔔 Meetup Check: {info['topic']}",
+            title=f"🔔 Attendance Check • {info['topic']}",
             description=(
-                f"📍 **Location:** `{info['location']}`\n"
-                f"⏰ **Time:** `{info['time_val']}`\n"
-                f"💬 If marked **🤔 Tentative**, please confirm on card!\n"
+                f"> 📍 **Location:** `{info['location']}`\n"
+                f"> ⏰ **Time:** `{info['time_val']}`\n\n"
+                f"💡 If marked **Tentative**, please confirm your spot on the meetup card!\n"
                 f"🔗 [Open Meetup Card]({jump_url})"
             ),
             color=0x5865F2
@@ -1095,10 +1085,10 @@ class SmartNotifyView(discord.ui.View):
         mentions_str = " ".join(not_arrived)
         jump_url = self.meetup_message.jump_url
         alert_embed = discord.Embed(
-            title=f"🏃‍♂️ Missing Check-ins: {info['topic']}",
+            title=f"🏃‍♂️ Arrival Check • {info['topic']}",
             description=(
-                f"📍 **Location:** `{info['location']}`\n"
-                f"⏰ **Time:** `{info['time_val']}`\n"
+                f"> 📍 **Location:** `{info['location']}`\n"
+                f"> ⏰ **Time:** `{info['time_val']}`\n\n"
                 f"✅ **Checked In:** `{len(checked_in_mentions)}/{len(info['going'])}`\n"
                 f"🔗 [Open Meetup Card to Check In]({jump_url})"
             ),
@@ -1526,12 +1516,12 @@ class MovieDateModal(discord.ui.Modal, title='📅 Movie Date & Participant Limi
 
         base_embed = discord.Embed(
             title=f"📅  🎬 {self.movie['name']}",
-            description="━━━━━━━━━━━━━━━━━━━━━━",
+            description="> 🔵 **Status:** Movie Meetup Draft (Review before posting)",
             color=0x5865F2
         )
         if self.movie['image']:
             base_embed.set_thumbnail(url=self.movie['image'])
-        base_embed.set_footer(text=f"🎯 Created by {interaction.user.display_name}  •  Click confirm to post")
+        base_embed.set_footer(text=f"🎯 Created by {interaction.user.display_name} • Click confirm to publish")
         base_embed.set_author(name="🔔 Movie Meetup Draft", icon_url=interaction.user.display_avatar.url)
 
         info = {
@@ -1754,19 +1744,17 @@ class MyBot(commands.Bot):
                     weather_desc = translate_weather_code(rain_code or current.get("weather_code", 0))
 
                     embed = discord.Embed(
-                        title="🌧️ Rain Warning Alert!",
+                        title="🌧️ Rain Warning Alert",
                         description=(
-                            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"Forecast detects rain in your area.\n"
-                            f"Weather: **{weather_desc}**\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━"
+                            f"> ⚠️ **Forecast expects rain in your area.**\n"
+                            f"> Weather Condition: **{weather_desc}**"
                         ),
                         color=0x3498DB
                     )
-                    embed.add_field(name="⏰ Estimated Time", value=f"```{rain_time}```", inline=True)
-                    embed.add_field(name="☔ Rain Chance", value=f"```{max_prob}%```", inline=True)
-                    embed.add_field(name="🌡️ Temp / Humidity", value=f"```{temp}°C / {humidity}%```", inline=True)
-                    embed.set_footer(text=f"📍 Coordinates: {self.weather_lat}, {self.weather_lon} • Re-alerts in 30 minutes if rain continues")
+                    embed.add_field(name="⏰ Estimated Time", value=f"**`{rain_time}`**", inline=True)
+                    embed.add_field(name="☔ Rain Chance", value=f"**`{max_prob}%`**", inline=True)
+                    embed.add_field(name="🌡️ Temp / Humidity", value=f"**`{temp}°C`** • `{humidity}%`", inline=True)
+                    embed.set_footer(text=f"📍 Coordinates: {self.weather_lat}, {self.weather_lon} • 30-min cooldown active")
 
                     map_buf = await generate_weather_map(self.weather_lat, self.weather_lon)
                     view = WeatherMapView(self.weather_lat, self.weather_lon)
@@ -2028,19 +2016,21 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
     if aq_warning:
         advice_parts.append(aq_warning)
 
+    desc_quote = "> " + "\n> ".join(advice_parts)
+
     embed = discord.Embed(
         title=f"🌅 Morning Briefing • {date_header}",
-        description=(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            + "\n".join(advice_parts)
-            + "\n━━━━━━━━━━━━━━━━━━━━━━"
-        ),
+        description=desc_quote,
         color=0xF39C12 if not is_dust_high else 0xE74C3C
     )
 
     embed.add_field(
         name="🌤️ Today's Weather",
-        value=f"**{weather_desc}**\nCurrent `{temp}°C` (Feels like `{feels_like}°C`)\nLow-High `{t_min}°C - {t_max}°C` • Humidity `{humidity}%`",
+        value=(
+            f"**{weather_desc}**\n"
+            f"Now **`{temp}°C`** (Feels like **`{feels_like}°C`**)\n"
+            f"Range: `{t_min}°C – {t_max}°C` • Humidity: `{humidity}%`"
+        ),
         inline=True
     )
 
@@ -2050,18 +2040,16 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
     else:
         rain_detail += "\nNo heavy rain expected"
     embed.add_field(
-        name="☔ Rain Chance",
+        name="☔ Rain Risk",
         value=rain_detail,
         inline=True
     )
 
     embed.add_field(
-        name="😷 PM 2.5 & AQI",
-        value=f"PM 2.5: **`{pm25_str}`**\nAQI `{aqi_val}` • {aq_status}",
+        name="😷 PM 2.5 & Air Quality",
+        value=f"PM 2.5: **`{pm25_str}`** • AQI: **`{aqi_val}`**\nStatus: {aq_status}",
         inline=False
     )
-
-    embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
 
     if today_meetups:
         meetup_lines = []
@@ -2072,13 +2060,13 @@ async def build_morning_briefing_card(lat: float, lon: float, guild_id_str: str 
             p_cnt = m.get("participants", 0)
             max_l = m.get("max_limit")
             p_txt = f"{p_cnt}/{max_l}" if max_l else f"{p_cnt}"
-            meetup_lines.append(f"`{idx}.` **{topic}** — 📍 {loc} • ⏰ `{t_str}` (👥 {p_txt})")
+            meetup_lines.append(f"`{idx:02d}.` **{topic}** — 📍 {loc} • ⏰ `{t_str}` (👥 {p_txt})")
         meetup_summary = "\n".join(meetup_lines)
     else:
-        meetup_summary = "📭 *No meetups scheduled for today. Type `/meetup` to organize one!*"
+        meetup_summary = "> 📭 *No meetups scheduled for today. Type `/meetup` to organize one!*"
 
     embed.add_field(
-        name=f"📅 Today's Meetups ({len(today_meetups)} items)",
+        name=f"📅 Today's Meetups ({len(today_meetups)})",
         value=meetup_summary[:1024],
         inline=False
     )
@@ -2147,10 +2135,10 @@ class CreateMeetupModal(discord.ui.Modal, title='📅 Create Meetup'):
 
         base_embed = discord.Embed(
             title=f"📅  {topic_val}",
-            description="━━━━━━━━━━━━━━━━━━━━━━",
+            description="> 🔵 **Status:** Meetup Draft (Review before posting)",
             color=0x5865F2
         )
-        base_embed.set_footer(text=f"🎯 Created by {interaction.user.display_name}  •  Click confirm to post")
+        base_embed.set_footer(text=f"🎯 Created by {interaction.user.display_name} • Click confirm to publish")
         base_embed.set_author(name="🔔 Meetup Draft", icon_url=interaction.user.display_avatar.url)
 
         info = {
@@ -2192,8 +2180,11 @@ async def meetup(interaction: discord.Interaction, type: app_commands.Choice[str
             return
 
         embed = discord.Embed(
-            title="🎬 Pick a Movie",
-            description="━━━━━━━━━━━━━━━━━━━━━━\nSelect a movie from dropdown below.\nPick showtime and bot creates meetup automatically!",
+            title="🎬 Select a Movie",
+            description=(
+                "> Choose a movie from the dropdown menu below.\n"
+                "> Next, select a date and showtime to auto-create your meetup card!"
+            ),
             color=0xE50914
         )
         embed.set_footer(text="📍 Major Cineplex Big C Lopburi")
@@ -2223,7 +2214,7 @@ async def meetup_history(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="📜 Meetup History",
-        description="━━━━━━━━━━━━━━━━━━━━━━\nLast 10 meetups in this server",
+        description="> Overview of the last 10 meetups organized in this server",
         color=0x5865F2
     )
 
@@ -2242,21 +2233,21 @@ async def meetup_history(interaction: discord.Interaction):
         tentative_cnt = entry.get("tentative_count", 0)
         created_by = entry.get("created_by", "Unknown")
 
-        p_str = f"{participants}/{max_limit}" if max_limit else f"{participants}"
+        p_str = f"`{participants}/{max_limit}`" if max_limit else f"`{participants}`"
         if tentative_cnt:
-            p_str += f" (Tentative {tentative_cnt})"
+            p_str += f" • Tentative `{tentative_cnt}`"
 
         embed.add_field(
-            name=f"`{i}.` {topic}",
+            name=f"`{i:02d}.` {topic}",
             value=(
-                f"📍 {location}  •  ⏰ {time_val}\n"
-                f"👥 {p_str}  •  🗓️ {date_str}\n"
-                f"Created by: {created_by}"
+                f"📍 `{location}`  •  ⏰ `{time_val}`\n"
+                f"👥 Attendees: {p_str}  •  🗓️ `{date_str}`\n"
+                f"👤 Organized by: **{created_by}**"
             ),
             inline=False
         )
 
-    embed.set_footer(text=f"Total {len(history)} meetups in this server")
+    embed.set_footer(text=f"Total: {len(history)} meetups recorded in this server")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -2297,8 +2288,12 @@ async def set_movie_channel(interaction: discord.Interaction, channel: discord.T
         save_config(config)
 
         embed = discord.Embed(
-            title="✅ Config Saved!",
-            description=f"Bot will send new movie alerts to {target_channel.mention}\n\nAuto-checks hourly.",
+            title="🎬 Movie Channel Configured",
+            description=(
+                f"> ✅ Broadcast channel set to {target_channel.mention}\n\n"
+                "• **Frequency:** Auto-checks Major Cineplex hourly\n"
+                "• **Content:** New releases, posters, and YouTube trailer links"
+            ),
             color=0x57F287
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -2716,11 +2711,12 @@ async def set_weather_channel(interaction: discord.Interaction, lat: float, lon:
         save_config(config)
 
         embed = discord.Embed(
-            title="✅ Weather & Daily Briefing Configured!",
+            title="🌦️ Weather & Morning Briefing Configured",
             description=(
-                f"Bot will send rain alerts and **🌅 Morning Briefing (07:30)** to {target_channel.mention}\n\n"
-                f"📍 **Coordinates:** `{lat}, {lon}`\n"
-                f"⏱️ When rain is detected, bot alerts **once** and cools down for **30 minutes**."
+                f"> ✅ Broadcast channel set to {target_channel.mention}\n\n"
+                f"📍 **Target Coordinates:** `{lat:.4f}, {lon:.4f}`\n"
+                "🌅 **Daily Morning Briefing:** Scheduled at `07:30` (UTC+7)\n"
+                "🌧️ **Live Rain Alerts:** Instant alerts with 30-min storm cooldown"
             ),
             color=0x3498DB
         )
@@ -2827,27 +2823,38 @@ async def check_weather_cmd(interaction: discord.Interaction, lat: float = None,
         else:
             card_color = 0x3498DB if max_rain_prob >= 60 else (0xF1C40F if max_rain_prob >= 30 else 0x2ECC71)
 
-        desc_text = f"━━━━━━━━━━━━━━━━━━━━━━\n# {weather_desc}\n━━━━━━━━━━━━━━━━━━━━━━"
+        desc_parts = [f"> ### **{weather_desc}**"]
         if aq_warning:
-            desc_text += f"\n{aq_warning}\n━━━━━━━━━━━━━━━━━━━━━━"
+            desc_parts.append(f"> ⚠️ **Air Quality Warning:** {aq_warning}")
+        desc_text = "\n".join(desc_parts)
 
         embed = discord.Embed(
-            title="🌤️ Weather Report • PM 2.5 & Live Rain Radar",
+            title="🌤️ Live Weather & Radar Report",
             description=desc_text,
             color=card_color
         )
-        embed.add_field(name="🌡️ Temperature", value=f"```{temp} °C```", inline=True)
-        embed.add_field(name="🥵 Feels Like", value=f"```{feels_like} °C```", inline=True)
-        embed.add_field(name="💧 Humidity", value=f"```{humidity} %```", inline=True)
-        embed.add_field(name="💨 Wind Speed", value=f"```{wind} km/h```", inline=True)
-        embed.add_field(name="☔ Max Rain Chance", value=f"```{max_rain_prob} %```", inline=True)
-        embed.add_field(name="📍 Coordinates", value=f"```{target_lat}, {target_lon}```", inline=True)
-        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        embed.add_field(name="😷 PM 2.5", value=f"```{pm25_str}```", inline=True)
-        embed.add_field(name="📊 Air Quality (AQI)", value=f"```AQI {aqi_val} • {aq_status}```", inline=True)
-        embed.add_field(name="\u200b", value="━━━━━━━━━━━━━━━━━━━━━━", inline=False)
-        embed.add_field(name="🕒 Hourly Forecast", value=forecast_text, inline=False)
-        embed.set_footer(text=f"🗺️ Live Rain Radar (red dot = your location) • Updated {now.strftime('%d/%m/%Y %H:%M')}")
+        embed.add_field(
+            name="🌡️ Temperature",
+            value=f"**{temp}°C**\nFeels like **`{feels_like}°C`**",
+            inline=True
+        )
+        embed.add_field(
+            name="💧 Conditions",
+            value=f"Humidity: **`{humidity}%`**\nWind: **`{wind} km/h`**",
+            inline=True
+        )
+        embed.add_field(
+            name="☔ Rain Risk",
+            value=f"Peak Chance: **`{max_rain_prob}%`**\nCoords: `{target_lat:.4f}, {target_lon:.4f}`",
+            inline=True
+        )
+        embed.add_field(
+            name="😷 Air Quality (AQI & PM 2.5)",
+            value=f"PM 2.5: **`{pm25_str}`** • AQI: **`{aqi_val}`**\nStatus: {aq_status}",
+            inline=False
+        )
+        embed.add_field(name="🕒 12-Hour Forecast", value=forecast_text, inline=False)
+        embed.set_footer(text=f"🗺️ Live Rain Radar • Updated {now.strftime('%d/%m/%Y %H:%M')}")
 
         map_buf = await generate_weather_map(target_lat, target_lon)
         view = WeatherMapView(target_lat, target_lon)

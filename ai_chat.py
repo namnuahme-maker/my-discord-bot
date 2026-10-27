@@ -112,11 +112,15 @@ def split_discord_message(text: str, limit: int = 1990) -> list[str]:
 
 
 class CapriAI:
-    """Capri AI manager using Google GenAI SDK (gemini-2.5-flash / gemini-3.8-flash)."""
+    """Capri AI manager using Google GenAI SDK (gemini-3.5-flash-lite for lowest cost and tokens)."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash", char_path: str = CHAR_PATH):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-3.5-flash-lite", char_path: str = CHAR_PATH):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        self.model = model
+        # Normalize deprecated models to gemini-3.5-flash-lite (lowest cost)
+        if model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-pro"):
+            self.model = "gemini-3.5-flash-lite"
+        else:
+            self.model = model
         self.char_path = char_path
         self.base_prompt, self.cave_prompt = load_character_prompts(self.char_path)
         self.client = None
@@ -167,10 +171,13 @@ class CapriAI:
             return self.chats[session_id]
 
         instruction, temp = self._get_system_instruction(is_caveman)
+        max_tokens = 600 if is_caveman else 1200
         config = types.GenerateContentConfig(
             system_instruction=instruction,
             temperature=temp,
             top_p=0.95,
+            max_output_tokens=max_tokens,
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
         )
 
         old_history = None
@@ -221,10 +228,32 @@ class CapriAI:
             else:
                 response = await chat.send_message(user_prompt)
 
+            # Prune conversation history to sliding window of last 10 messages (5 turns) to save tokens
+            if hasattr(chat, "_curated_history") and len(chat._curated_history) > 10:
+                chat._curated_history = chat._curated_history[-10:]
+
             return response.text or "*Capri มองคุณเงียบๆ แล้วฉีกยิ้มกวนประสาท (ไม่มีข้อความ)*"
         except Exception as e:
             err_msg = str(e)
             print(f"[CapriAI] API Error: {err_msg}")
+
+            # Auto-heal deprecated model 404 error
+            if "404" in err_msg and ("not_found" in err_msg.lower() or "no longer available" in err_msg.lower()):
+                if self.model != "gemini-3.8-flash":
+                    print(f"[CapriAI] Upgrading deprecated model {self.model} -> gemini-3.8-flash")
+                    self.set_model("gemini-3.8-flash")
+                    try:
+                        retry_chat = await self.get_or_create_chat(session_id, is_caveman)
+                        if retry_chat:
+                            if images:
+                                resp = await retry_chat.send_message(list(images) + [user_prompt])
+                            else:
+                                resp = await retry_chat.send_message(user_prompt)
+                            return resp.text or "*Capri มองคุณเงียบๆ แล้วฉีกยิ้มกวนประสาท (ไม่มีข้อความ)*"
+                    except Exception as retry_err:
+                        err_msg = str(retry_err)
+                        print(f"[CapriAI] Retry Error: {err_msg}")
+
             if "RESOURCE_EXHAUSTED" in err_msg or "rate limit" in err_msg.lower():
                 return "*ICE โอเวอร์ฮีต! สัญญาณความร้อนพุ่งสูงเกินพิกัด* ⚠️ โดน Rate Limit เล่นงานแล้วจ้ะ Choom! รอสักแป๊บแล้วลองใหม่นะ!"
             return f"*ICE สปาร์ก ประกายไฟสีแดงแลบผ่านหน้าจอ* ⚠️ การเชื่อมต่อ Neural Link ขัดข้อง: `{err_msg[:200]}`"
@@ -296,7 +325,9 @@ def setup_ai_chat(bot, load_config_func, save_config_func):
     """Register Capri AI chat slash commands and initialize bot.capri_ai."""
     config = load_config_func()
     api_key = config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
-    model = config.get("gemini_model", "gemini-2.5-flash")
+    model = config.get("gemini_model", "gemini-3.5-flash-lite")
+    if model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-pro"):
+        model = "gemini-3.5-flash-lite"
     ai_channel_id = config.get("ai_channel_id")
 
     bot.capri_ai = CapriAI(api_key=api_key, model=model, char_path=CHAR_PATH)
@@ -418,6 +449,44 @@ def setup_ai_chat(bot, load_config_func, save_config_func):
                 "• **โหมด:** รองรับทั้งส่งข้อความ รูปภาพ และเปลี่ยนโหมดด้วย `/ai-mode`"
             ),
             color=0x00F0FF
+        )
+        await interaction.response.send_message(embed=embed)
+
+    # ---------- Command: /ai-model ----------
+    @bot.tree.command(name="ai-model", description="Switch Capri's Gemini model (Flash-Lite for lowest cost, Flash for deep reasoning)")
+    @app_commands.describe(model="Select AI model")
+    @app_commands.choices(model=[
+        app_commands.Choice(name="⚡ gemini-3.5-flash-lite (Recommended: Lowest Cost, Fastest, Least Tokens)", value="gemini-3.5-flash-lite"),
+        app_commands.Choice(name="🧠 gemini-3.8-flash (Standard: Advanced Reasoning & Coding)", value="gemini-3.8-flash")
+    ])
+    async def ai_model_cmd(interaction: discord.Interaction, model: app_commands.Choice[str] = None):
+        if model is None:
+            embed = discord.Embed(
+                title="🤖 Capri Model Information",
+                description=(
+                    f"> **โมเดลที่ใช้งานอยู่:** `{bot.capri_ai.model}`\n\n"
+                    "• `gemini-3.5-flash-lite`: ถูกที่สุด เร็วที่สุด กิน token น้อยสุด (Input $0.30, Output $2.50 / 1M tokens)\n"
+                    "• `gemini-3.8-flash`: สำหรับการเขียนโค้ดและวิเคราะห์เชิงลึก (Input $0.75, Output $3.75 / 1M tokens)\n\n"
+                    "💡 *ใช้ `/ai-model <model>` เพื่อเปลี่ยนโมเดล*"
+                ),
+                color=0x00F0FF
+            )
+            await interaction.response.send_message(embed=embed)
+            return
+
+        bot.capri_ai.set_model(model.value)
+        cfg = load_config_func()
+        cfg["gemini_model"] = model.value
+        save_config_func(cfg)
+
+        embed = discord.Embed(
+            title="⚡ Model Switched Successfully",
+            description=(
+                f"> ✅ เปลี่ยนโมเดลเป็น **`{model.value}`** เรียบร้อยแล้ว!\n\n"
+                f"• คำอธิบาย: `{model.name}`\n"
+                "• บันทึกการตั้งค่าลง `config.json` เรียบร้อย"
+            ),
+            color=0x57F287
         )
         await interaction.response.send_message(embed=embed)
 
